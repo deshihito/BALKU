@@ -13,7 +13,7 @@ function getSupabaseConfig() {
 
 async function supabaseRequest<T>(
   table: string,
-  options: { method?: "GET" | "POST" | "PATCH"; query?: Record<string, string>; body?: unknown; returning?: boolean },
+  options: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; body?: unknown; returning?: boolean },
 ): Promise<T> {
   const { url, key } = getSupabaseConfig();
   const endpoint = new URL(`${url}/rest/v1/${table}`);
@@ -44,6 +44,7 @@ export async function createGameRoomRecord(input: {
   code: string;
   hostToken: string;
   maxPlayers: number;
+  isPublic: boolean;
   gameState: unknown;
   hostName: string;
 }) {
@@ -54,6 +55,7 @@ export async function createGameRoomRecord(input: {
       code: input.code,
       hostToken: input.hostToken,
       maxPlayers: input.maxPlayers,
+      isPublic: input.isPublic,
       status: "lobby",
       gameState: input.gameState,
     },
@@ -78,6 +80,13 @@ export async function getGameRoomByCode(code: string) {
     query: { code: `eq.${code}`, limit: "1" },
   });
   return rows[0];
+}
+
+export async function getPublicRooms() {
+  const rows = await supabaseRequest<GameRoom[]>("gameRooms", {
+    query: { isPublic: `eq.true`, status: `eq.lobby`, order: "createdAt.desc", limit: "20" },
+  });
+  return rows;
 }
 
 export async function getRoomPlayers(roomId: number) {
@@ -108,6 +117,13 @@ export async function addRoomPlayerRecord(input: {
       seat: input.seat,
       isHost: 0,
     },
+  });
+}
+
+export async function removeRoomPlayer(roomId: number, playerToken: string) {
+  await supabaseRequest("roomPlayers", {
+    method: "DELETE",
+    query: { roomId: `eq.${roomId}`, playerToken: `eq.${playerToken}` },
   });
 }
 
