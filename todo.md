@@ -163,3 +163,18 @@
 - [x] Supabase PostgreSQL接続へ切り替え、MySQL/TiDB依存を除去する。
 - [x] Supabase向けDrizzleスキーマ・マイグレーション・Render環境変数を整備する。
 - [x] Supabase移行後に型検査・テスト・ビルドを再実行しGitHubへ反映する。
+
+- [ ] 接続済みSupabaseへBALKU PostgreSQLマイグレーションを適用する。
+- [ ] Supabase実DBでルーム作成・参加・状態更新を検証する。
+
+- [x] Render登録済みのSUPABASE_URLとSUPABASE_KEYをGitHub版サーバーDB層で利用する。
+- [ ] Supabase REST接続でルーム作成・参加・状態更新を検証する。
+- [x] SUPABASE_KEYの名前とSupabase SQL適用手順をREADMEへ確定する。
+
+- [ ] 再デプロイ後のRender公開版がGitHub最新コミットを提供することを確認する。
+- [ ] SQL適用後のSupabaseテーブルと公開ルーム作成APIを確認する。
+- [ ] 公開URLでルーム作成導線を確認する。
+
+- [x] Render公開URLの白画面でHTML・アセット・ブラウザコンソールを調査する。
+- [x] Render起動設定とGitHub最新コードのビルド成果物を照合する。
+- [x] 白画面の原因を修正し、型検査・テスト・ビルドを再実行する。
