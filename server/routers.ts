@@ -8,6 +8,8 @@ import {
   getRoomPlayer,
   getRoomPlayers,
   updateGameRoomState,
+  getPublicRooms,
+  removeRoomPlayer,
 } from "./db";
 import { addLobbyPlayer, applyGameAction, createLobbyState, expireTimedOutTurn, resetToLobby, type GameAction, type RoomGameState, startGame } from "./balkuGame";
 import { systemRouter } from "./_core/systemRouter";
@@ -19,7 +21,7 @@ const codeSchema = z.string().trim().toUpperCase().regex(/^[A-Z2-9]{6}$/, "ル�
 const tokenSchema = z.string().min(16).max(64);
 const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("submit"), projectId: z.string(), materialIds: z.array(z.string()).max(9), faceUp: z.boolean(), targetSeat: z.number().int().min(0).max(3).optional() }),
-  z.object({ type: z.literal("buyMaterial"), material: z.enum(["木材", "鉄骨", "コンクリート", "ガラス", "銅線", "合金", "超伝導体"]) }),
+  z.object({ type: z.literal("buyMaterial"), material: z.enum(["木材", "鉄骨", "コンクリート", "ガラス", "銅線", "合金", "超伝導体", "ゴミ"]) }),
   z.object({ type: z.literal("sellCards"), cardIds: z.array(z.string()).min(1).max(72) }),
   z.object({ type: z.literal("bid"), amount: z.number().int().min(1).max(99) }),
   z.object({ type: z.literal("bulkCall"), targetSeat: z.number().int().min(0).max(3), submissionId: z.string() }),
@@ -68,12 +70,12 @@ export const appRouter = router({
   system: systemRouter,
   balku: router({
     createRoom: publicProcedure
-      .input(z.object({ displayName: nameSchema, maxPlayers: z.number().int().min(2).max(4) }))
+      .input(z.object({ displayName: nameSchema, maxPlayers: z.number().int().min(2).max(4), isPublic: z.boolean().default(true) }))
       .mutation(async ({ input }) => {
         const code = roomCode();
         const playerToken = nanoid(32);
         const state = createLobbyState(input.displayName);
-        await createGameRoomRecord({ code, hostToken: playerToken, maxPlayers: input.maxPlayers, gameState: state, hostName: input.displayName });
+        await createGameRoomRecord({ code, hostToken: playerToken, maxPlayers: input.maxPlayers, isPublic: input.isPublic, gameState: state, hostName: input.displayName });
         return { code, playerToken };
       }),
     joinRoom: publicProcedure
@@ -90,6 +92,20 @@ export const appRouter = router({
         if (!saved) throw new TRPCError({ code: "CONFLICT", message: "参加が重なりました。もう一度お試しください。" });
         await addRoomPlayerRecord({ roomId: room.id, playerToken, displayName: input.displayName, seat: state.players.length - 1 });
         return { code: input.code, playerToken };
+      }),
+    getPublicRooms: publicProcedure
+      .query(async () => {
+        const rooms = await getPublicRooms();
+        return rooms.map((room) => {
+          const state = parseState(room.gameState) as RoomGameState;
+          return {
+            code: room.code,
+            status: room.status,
+            maxPlayers: room.maxPlayers,
+            playerCount: state.players.length,
+            createdAt: room.createdAt,
+          };
+        });
       }),
     getRoom: publicProcedure
       .input(z.object({ code: codeSchema, playerToken: tokenSchema }))
@@ -144,6 +160,14 @@ export const appRouter = router({
         const next = resetToLobby(state);
         const saved = await updateGameRoomState({ code: input.code, expectedRevision: room.revision, gameState: next, status: "lobby" });
         if (!saved) throw new TRPCError({ code: "CONFLICT", message: "再戦の準備が重なりました。もう一度お試しください。" });
+        return { success: true };
+      }),
+    leaveRoom: publicProcedure
+      .input(z.object({ code: codeSchema, playerToken: tokenSchema }))
+      .mutation(async ({ input }) => {
+        const room = await getGameRoomByCode(input.code);
+        if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "ルームが見つかりません。" });
+        await removeRoomPlayer(room.id, input.playerToken);
         return { success: true };
       }),
     move: publicProcedure
