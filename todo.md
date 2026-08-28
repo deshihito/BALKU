@@ -154,3 +154,12 @@
 - [x] 現行BALKUプロジェクトをGitHubのdeshihito/BALKUへ同期する。
 - [x] GitHubへ秘密情報を含めず、Render用の起動設定と環境変数前提を確認する。
 - [x] GitHub同期結果とRenderデプロイ手順を記録する。
+
+- [x] Manus固有のOAuth・組み込みAPI・ストレージ・Heartbeat依存を洗い出す。
+- [x] GitHub単体で動く認証・セッション・ストレージ構成へ置換する。
+- [x] Render用の環境変数、ビルド、起動、DBマイグレーション手順を更新する。
+- [x] Manus依存なしの型検査・テスト・ビルド・起動確認を行いGitHubへ反映する。
+
+- [x] Supabase PostgreSQL接続へ切り替え、MySQL/TiDB依存を除去する。
+- [x] Supabase向けDrizzleスキーマ・マイグレーション・Render環境変数を整備する。
+- [x] Supabase移行後に型検査・テスト・ビルドを再実行しGitHubへ反映する。
