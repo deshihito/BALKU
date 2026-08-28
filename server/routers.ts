@@ -1,7 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { customAlphabet, nanoid } from "nanoid";
 import { z } from "zod";
-import { COOKIE_NAME } from "../shared/const";
 import {
   addRoomPlayerRecord,
   createGameRoomRecord,
@@ -11,7 +10,6 @@ import {
   updateGameRoomState,
 } from "./db";
 import { addLobbyPlayer, applyGameAction, createLobbyState, expireTimedOutTurn, resetToLobby, type GameAction, type RoomGameState, startGame } from "./balkuGame";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 
@@ -68,16 +66,6 @@ const loadRoomAndPlayer = async (code: string, playerToken: string) => {
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
-  auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
-    }),
-  }),
   balku: router({
     createRoom: publicProcedure
       .input(z.object({ displayName: nameSchema, maxPlayers: z.number().int().min(2).max(4) }))

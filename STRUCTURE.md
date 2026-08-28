@@ -14,7 +14,7 @@
 | `server/db.ts` / `drizzle/schema.ts` | ルーム状態と参加者情報をMySQL/TiDBへ保存し、楽観ロックで更新する。 |
 | `TESTING.md` | 自動テストとブラウザ／同期検証の記録を保持する。 |
 
-`GameCanvas.tsx`、`GameWorld.ts`、Babylon関連の旧ファイルは初期試作のため残しているが、現行のオンラインルートからは利用しない。
+旧Babylon試作ファイルと不要なランタイムは独立版から除去し、現行のオンラインルートはReact DOMとNode/Expressだけで構成する。
 
 ## 状態同期
 
@@ -32,4 +32,4 @@
 
 ## アセット
 
-背景には `/manus-storage/balku-drafting-table-background_3ee1825b.jpg`、ロゴには `/manus-storage/balku-logo-mark_b603e974.png` を使用する。静的アセットはプロジェクト内に格納せず、永続的なストレージURLを参照する。
+背景、ロゴ、カードの質感はCSSで表現し、外部ストレージURLへ依存しない。Renderへのデプロイ時に追加のアセットサーバーは不要である。

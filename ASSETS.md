@@ -6,14 +6,14 @@
 
 | Name | Description | Size | Image |
 |---|---|---|---|
-| drafting-table | 俯瞰した夜の製図台と図面紙。ゲーム盤の背景。 | 1920×1080 px、フルスクリーン | `/manus-storage/balku-drafting-table-background_3ee1825b.jpg` |
-| visual-target | 提出束、手札、操作帯、市場を含む完成画面の参照。 | 1920×1080 px、設計参照 | `/manus-storage/balku-visual-target_35d89e65.jpg` |
+| drafting-table | 俯瞰した夜の製図台と図面紙。ゲーム盤の背景。 | 1920×1080 px、フルスクリーン | CSSの製図線・グラデーションで再現 |
+| visual-target | 提出束、手札、操作帯、市場を含む完成画面の参照。 | 1920×1080 px、設計参照 | リポジトリ内のUI実装を正とする |
 
 ## Sprites and Card Art
 
 | Name | Description | Size | Image |
 |---|---|---|---|
-| balku-mark | 建築ブロックと測量ピンで構成したBの記号。 | 74×74 px、ヘッダー | `/manus-storage/balku-logo-mark_b603e974.png` |
-| project-art | ブルータリスト建築の企画書アート。 | 160×230 px、企画カードの背景質感 | `/manus-storage/balku-project-card-art_a715bfaf.jpg` |
-| material-board | 木材、鉄骨、コンクリート等の見本。 | 156×112 px、素材カードの背景質感 | `/manus-storage/balku-material-reference_e2fdc3d7.jpg` |
+| balku-mark | 建築ブロックと測量ピンで構成したBの記号。 | 74×74 px、ヘッダー | テキスト／CSS表現 |
+| project-art | ブルータリスト建築の企画書アート。 | 160×230 px、企画カードの背景質感 | CSSカード表現 |
+| material-board | 木材、鉄骨、コンクリート等の見本。 | 156×112 px、素材カードの背景質感 | CSSカード表現 |
 

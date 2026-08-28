@@ -42,18 +42,9 @@ RenderのWeb Serviceとして次の設定を使用します。
 |---|---|
 | `DATABASE_URL` | MySQL/TiDB接続文字列 |
 | `JWT_SECRET` | セッション署名用の秘密鍵 |
-| `VITE_APP_ID` | Manus OAuthを利用する場合のアプリケーションID |
-| `OAUTH_SERVER_URL` | OAuthサーバーURL |
-| `VITE_OAUTH_PORTAL_URL` | OAuthポータルURL |
-| `OWNER_OPEN_ID` | 所有者情報 |
-| `OWNER_NAME` | 所有者名 |
-| `BUILT_IN_FORGE_API_URL` | 組み込みAPIを利用する場合のサーバーURL |
-| `BUILT_IN_FORGE_API_KEY` | 組み込みAPIのサーバーキー |
-| `VITE_FRONTEND_FORGE_API_URL` | フロントエンドAPI URL |
-| `VITE_FRONTEND_FORGE_API_KEY` | フロントエンドAPIキー |
 
-匿名ルーム参加を中心に利用する場合でも、サーバー起動とゲーム状態保存のため `DATABASE_URL` は必須です。OAuthを使わない場合は、アプリケーション側の認証導線に合わせてOAuth関連変数を設定してください。
+アカウント認証は使用せず、ルーム参加時に発行するプレイヤートークンでゲーム操作を認可します。そのため、ゲームを起動するために必要な秘密情報は `DATABASE_URL` と `JWT_SECRET` です。`PORT` はRenderが自動的に設定します。
 
 ## 注意事項
 
-このリポジトリには秘密鍵、`.env`ファイル、依存パッケージ、ビルド生成物を含めていません。Renderではデータベースを別途用意し、TLS接続を有効にしてください。Manus固有の組み込みAPIやOAuthをRenderから利用する場合は、対応する本番用URLとキーをRenderの環境変数へ登録する必要があります。
+このリポジトリには秘密鍵、`.env`ファイル、依存パッケージ、ビルド生成物を含めていません。RenderではMySQL/TiDB互換データベースを別途用意し、TLS接続を有効にしてください。RenderのWeb Service URLとカスタムドメインはRender側で管理します。

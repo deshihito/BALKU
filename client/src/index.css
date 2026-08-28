@@ -39,7 +39,7 @@ canvas { display: block; }
 .font-display { font-family: "Barlow Condensed", sans-serif; }
 
 .desk-art {
-  background-image: linear-gradient(90deg, rgba(5, 18, 24, 0.88), rgba(5, 18, 24, 0.45)), url("/manus-storage/balku-drafting-table-background_3ee1825b.jpg");
+  background-image: radial-gradient(circle at 78% 18%, rgba(58, 120, 132, 0.22), transparent 28%), linear-gradient(90deg, rgba(5, 18, 24, 0.98), rgba(5, 18, 24, 0.72)), repeating-linear-gradient(0deg, rgba(57, 191, 232, 0.08) 0 1px, transparent 1px 42px), repeating-linear-gradient(90deg, rgba(57, 191, 232, 0.08) 0 1px, transparent 1px 42px);
   background-position: center;
   background-size: cover;
 }
