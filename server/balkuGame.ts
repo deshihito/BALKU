@@ -139,7 +139,7 @@ const createDeck = (state: RoomGameState, playerCount: number) => {
     { card: project("", "つり橋", 8, { 鉄骨: 2, コンクリート: 2 }, "draw", 3, "カードを3枚引く"), copies: 2 },
     { card: project("", "オフィス", 7, { コンクリート: 2, 銅線: 2 }, "coins", 5, "コイン +5"), copies: 2 },
     { card: project("", "ガラスドーム", 6, { 鉄骨: 1, ガラス: 2, 木材: 1 }, "coins", 4, "コイン +4"), copies: 2 },
-    { card: project("", "言いがかりく", 5, { 鉄骨: 2, 銅線: 1 }, "forceBulk", 1, "強制BALKUを1回獲得"), copies: 3 },
+    { card: project("", "言いがかり", 5, { 鉄骨: 2, 銅線: 1 }, "forceBulk", 1, "強制BALKUを1回獲得"), copies: 3 },
     { card: project("", "品質保証", 5, { 木材: 1, ガラス: 2 }, "pointBoost", 3, "最終ポイント +3"), copies: 2 },
     { card: project("", "文句を言うもんく", 4, { 銅線: 2, コンクリート: 1 }, "stealCoins", 3, "指定会社から3コイン徴収"), copies: 2 },
     { card: project("", "施工停止命令", 3, { 木材: 1, 鉄骨: 1, ガラス: 1 }, "discard", 2, "指定会社の手札を2枚破棄"), copies: 2 },
