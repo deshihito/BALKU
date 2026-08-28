@@ -4,7 +4,7 @@
 
 ## 技術構成
 
-React 19、Vite、TypeScript、Tailwind CSS、Express、tRPC、Drizzle ORM、MySQL/TiDBを使用しています。ゲーム状態はサーバー側のデータベースへ保存し、クライアントはルーム状態を定期同期します。
+React 19、Vite、TypeScript、Tailwind CSS、Express、tRPC、Drizzle ORM、Supabase REST APIを使用しています。ゲーム状態はSupabase PostgreSQLへ保存し、クライアントはルーム状態を定期同期します。
 
 ## ローカル開発
 
@@ -40,11 +40,11 @@ RenderのWeb Serviceとして次の設定を使用します。
 
 | 変数 | 用途 |
 |---|---|
-| `DATABASE_URL` | MySQL/TiDB接続文字列 |
-| `JWT_SECRET` | セッション署名用の秘密鍵 |
+| `SUPABASE_URL` | SupabaseプロジェクトURL |
+| `SUPABASE_KEY` | サーバーからSupabase REST APIへ接続するキー |
 
-アカウント認証は使用せず、ルーム参加時に発行するプレイヤートークンでゲーム操作を認可します。そのため、ゲームを起動するために必要な秘密情報は `DATABASE_URL` と `JWT_SECRET` です。`PORT` はRenderが自動的に設定します。
+アカウント認証は使用せず、ルーム参加時に発行するプレイヤートークンでゲーム操作を認可します。ゲームサーバーは `SUPABASE_URL` と `SUPABASE_KEY` でSupabase REST APIへ接続します。`PORT` はRenderが自動的に設定します。
 
 ## 注意事項
 
-このリポジトリには秘密鍵、`.env`ファイル、依存パッケージ、ビルド生成物を含めていません。RenderではMySQL/TiDB互換データベースを別途用意し、TLS接続を有効にしてください。RenderのWeb Service URLとカスタムドメインはRender側で管理します。
+このリポジトリには秘密鍵、`.env`ファイル、依存パッケージ、ビルド生成物を含めていません。初回デプロイ前に、Supabase DashboardのSQL Editorで `drizzle/0000_curvy_harry_osborn.sql` を一度だけ実行してテーブルを作成してください。`SUPABASE_KEY` はクライアントへ公開せず、Renderのサーバー環境変数だけに登録します。RenderのWeb Service URLとカスタムドメインはRender側で管理します。
