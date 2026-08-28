@@ -41,6 +41,13 @@
           "notNull": true,
           "default": 4
         },
+        "isPublic": {
+          "name": "isPublic",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "gameState": {
           "name": "gameState",
           "type": "jsonb",
