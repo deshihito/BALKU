@@ -151,6 +151,6 @@
 
 - [x] 15秒オークションで連続入札するたびに期限が15秒へリセットされることを専用テストで固定する。
 
-- [ ] 現行BALKUプロジェクトをGitHubのdeshihito/BALKUへ同期する。
-- [ ] GitHubへ秘密情報を含めず、Render用の起動設定と環境変数前提を確認する。
-- [ ] GitHub同期結果とRenderデプロイ手順を記録する。
+- [x] 現行BALKUプロジェクトをGitHubのdeshihito/BALKUへ同期する。
+- [x] GitHubへ秘密情報を含めず、Render用の起動設定と環境変数前提を確認する。
+- [x] GitHub同期結果とRenderデプロイ手順を記録する。
