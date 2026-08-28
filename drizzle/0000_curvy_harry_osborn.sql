@@ -5,6 +5,7 @@ CREATE TABLE "gameRooms" (
 	"hostToken" varchar(64) NOT NULL,
 	"status" "room_status" DEFAULT 'lobby' NOT NULL,
 	"maxPlayers" integer DEFAULT 4 NOT NULL,
+	"isPublic" boolean DEFAULT true NOT NULL,
 	"gameState" jsonb NOT NULL,
 	"revision" integer DEFAULT 1 NOT NULL,
 	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
