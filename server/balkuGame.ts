@@ -1,4 +1,4 @@
-export type MaterialKind = "木材" | "鉄骨" | "コンクリート" | "ガラス" | "銅線" | "合金" | "超伝導体";
+export type MaterialKind = "木材" | "鉄骨" | "コンクリート" | "ガラス" | "銅線" | "合金" | "超伝導体" | "ゴミ";
 export type EffectType = "coins" | "draw" | "gainMaterial" | "randomMaterial" | "randomProject" | "pointBoost" | "income" | "randomMaterialIncome" | "mysteryHouse" | "stealCoins" | "stealCard" | "discard" | "forceBulk";
 
 export type MaterialCard = { id: string; kind: "material"; material: MaterialKind; name: string; value: number; rarity?: "premium" };
@@ -33,7 +33,6 @@ export type GamePlayer = {
   scoreBonus: number;
   forceBulkCharges: ForceBulkCharge[];
 };
-/** 自動オークションは売り手を持たず、全員が入札できる共通市場である。 */
 export type Auction = { card: GameCard; highestBid: number; highestBidderSeat: number | null; deadlineAt: number; roundOpened: number };
 export type LogTone = "neutral" | "good" | "warning" | "danger";
 export type GameLog = { id: string; text: string; tone: LogTone; createdAt: number };
@@ -63,9 +62,9 @@ export type GameAction =
   | { type: "forceBulk"; chargeId: string; targetSeat: number; submissionId: string }
   | { type: "endTurn" };
 
-const materialKinds: MaterialKind[] = ["木材", "鉄骨", "コンクリート", "ガラス", "銅線", "合金"];
+const materialKinds: MaterialKind[] = ["木材", "鉄骨", "コンクリート", "ガラス", "銅線", "合金", "ゴミ"];
 const targetedEffects: EffectType[] = ["stealCoins", "discard"];
-const marketPrices: Record<MaterialKind, number> = { 木材: 5, 鉄骨: 5, コンクリート: 5, ガラス: 5, 銅線: 5, 合金: 7, 超伝導体: 10 };
+const marketPrices: Record<MaterialKind, number> = { 木材: 5, 鉄骨: 5, コンクリート: 5, ガラス: 5, 銅線: 5, 合金: 7, 超伝導体: 10, ゴミ: 1 };
 export const TURN_LIMIT_MS = 60_000;
 export const AUCTION_LIMIT_MS = 15_000;
 
@@ -87,6 +86,7 @@ export const NEW_PROJECT_DEFINITIONS = [
   { card: project("", "小屋", 6, { 木材: 3 }, "coins", 1, "コイン +1"), copies: 3 },
   { card: project("", "光ファイバー", 1, { 銅線: 3 }, "gainMaterial", 1, "超伝導体を1枚獲得", false, "超伝導体"), copies: 2 },
   { card: project("", "ミュージアム", 2, { コンクリート: 1, 鉄骨: 1, ガラス: 1 }, "randomProject", 1, "ランダムな企画カードを1枚獲得"), copies: 2 },
+  { card: project("", "ゴミ山", 1, { ゴミ: 3 }, "coins", 1, "コイン +1"), copies: 3 },
 ] as const;
 const nextId = (state: RoomGameState, prefix: string) => `${prefix}-${++state.serial}`;
 
@@ -102,7 +102,6 @@ const scoreBreakdown = (player: GamePlayer) => {
 };
 const totalPoints = (player: GamePlayer) => scoreBreakdown(player).points;
 
-/** 山札を再生成しない。空になれば、オークションを決済して最終精算する。 */
 const draw = (state: RoomGameState, player: GamePlayer, count: number) => {
   let drawn = 0;
   while (drawn < count && state.deck.length > 0) {
@@ -113,7 +112,6 @@ const draw = (state: RoomGameState, player: GamePlayer, count: number) => {
   return drawn;
 };
 
-/** 人数に応じて、全員が約10手番ずつを得る固定山札を構成する。 */
 const createDeck = (state: RoomGameState, playerCount: number) => {
   const library: GameCard[] = [];
   materialKinds.forEach((kind) => {
@@ -354,7 +352,6 @@ const finishActionAndAdvance = (state: RoomGameState) => {
   else advanceTurn(state);
 };
 
-/** 期限判定は取得・操作のたびにサーバー側で行い、常駐タイマーへ依存しない。 */
 export function expireTimedOutTurn(state: RoomGameState, now = Date.now()) {
   if (state.phase !== "active") return state;
   let next = state;
@@ -455,15 +452,13 @@ export function applyGameAction(state: RoomGameState, seat: number, action: Game
     advanceTurn(next);
     return next;
   }
-  if (actor.actionUsed) throw new Error("今ターンの行動権は使用済みです。");
+
   if (action.type === "buyMaterial") {
     const price = marketPrices[action.material];
     if (actor.coins < price) throw new Error(`${action.material}の直接調達には${price}コイン必要です。`);
     actor.coins -= price;
     actor.hand.push(material(nextId(next, "market"), action.material));
-    actor.actionUsed = true;
     log(next, `${actor.name}は調達市場から「${action.material}」を${price}コインで直接獲得。`, "good");
-    finishActionAndAdvance(next);
     return next;
   }
   if (action.type === "sellCards") {
@@ -473,9 +468,12 @@ export function applyGameAction(state: RoomGameState, seat: number, action: Game
     if (cards.length !== ids.size) throw new Error("売却できるのは手札にあるカードのみです。");
     actor.hand = actor.hand.filter((card) => !ids.has(card.id));
     actor.coins += cards.length;
-    log(next, `${actor.name}はカード ${cards.length} 枚を売却し、${cards.length}コインを獲得。施工権は維持。`, "good");
+    log(next, `${actor.name}はカード ${cards.length} 枚を売却し、${cards.length}コインを獲得。`, "good");
     return next;
   }
+
+  if (actor.actionUsed) throw new Error("今ターンの行動権は使用済みです。");
+
   if (action.type === "submit") {
     const plan = actor.hand.find((card): card is ProjectCard => card.id === action.projectId && card.kind === "project");
     if (!plan) throw new Error("提出する企画カードを選択してください。");
