@@ -7,6 +7,7 @@ import {
   timestamp,
   uniqueIndex,
   varchar,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const roomStatus = pgEnum("room_status", ["lobby", "active", "finished"]);
@@ -18,6 +19,7 @@ export const gameRooms = pgTable("gameRooms", {
   hostToken: varchar("hostToken", { length: 64 }).notNull(),
   status: roomStatus("status").default("lobby").notNull(),
   maxPlayers: integer("maxPlayers").default(4).notNull(),
+  isPublic: boolean("isPublic").default(true).notNull(),
   gameState: jsonb("gameState").notNull(),
   revision: integer("revision").default(1).notNull(),
   createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
