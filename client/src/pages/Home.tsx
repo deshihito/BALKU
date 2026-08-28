@@ -1,13 +1,13 @@
 import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, BookOpen, Check, CircleDot, Clock3, Coins, Copy, Gavel, Hammer, LogOut, PackageOpen, Play, Plus, RotateCcw, ShieldAlert, ShoppingBag, Sparkles, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowRight, BookOpen, Check, CircleDot, Clock3, Coins, Copy, Gavel, Globe, Hammer, LogOut, PackageOpen, Play, Plus, RotateCcw, ShieldAlert, ShoppingBag, Sparkles, Users, X, Zap } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { sortHandCards } from "@/lib/handSort";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 type Session = { code: string; playerToken: string };
-type MaterialKind = "木材" | "鉄骨" | "コンクリート" | "ガラス" | "銅線" | "合金" | "超伝導体";
+type MaterialKind = "木材" | "鉄骨" | "コンクリート" | "ガラス" | "銅線" | "合金" | "超伝導体" | "ゴミ";
 type EffectType = "coins" | "draw" | "gainMaterial" | "randomMaterial" | "randomProject" | "pointBoost" | "income" | "randomMaterialIncome" | "mysteryHouse" | "stealCoins" | "stealCard" | "discard" | "forceBulk";
 type Card = { id: string; kind: "material" | "project"; name: string; material?: MaterialKind; rarity?: "premium"; points?: number; requirements?: Record<string, number>; immediate?: boolean; effect?: { type: EffectType; label: string; material?: MaterialKind } };
 type Submission = { id: string; project: Card; faceUp: boolean; legal: boolean; effectActivated: boolean; materialCount: number };
@@ -18,9 +18,27 @@ type RoomState = { phase: "lobby" | "active" | "finished"; turn: number; activeS
 type CutIn = { logId: string; eyebrow: string; title: string; detail: string; tone: "good" | "warning" | "danger"; marker: "build" | "inspect" | "market" | "final" };
 
 const MATERIAL_STYLE: Record<string, string> = {
-  木材: "border-orange-300/70 bg-orange-950/50 text-orange-200", 鉄骨: "border-slate-300/50 bg-slate-800/80 text-slate-100", コンクリート: "border-stone-300/50 bg-stone-700/80 text-stone-100", ガラス: "border-cyan-300/70 bg-cyan-950/55 text-cyan-100", 銅線: "border-amber-400/60 bg-amber-950/50 text-amber-100", 合金: "border-violet-300/70 bg-violet-950/55 text-violet-100", 超伝導体: "border-fuchsia-300 bg-gradient-to-br from-fuchsia-950 to-indigo-950 text-fuchsia-100",
+  木材: "border-orange-300/70 bg-orange-950/50 text-orange-200",
+  鉄骨: "border-slate-300/50 bg-slate-800/80 text-slate-100",
+  コンクリート: "border-stone-300/50 bg-stone-700/80 text-stone-100",
+  ガラス: "border-cyan-300/70 bg-cyan-950/55 text-cyan-100",
+  銅線: "border-amber-400/60 bg-amber-950/50 text-amber-100",
+  合金: "border-violet-300/70 bg-violet-950/55 text-violet-100",
+  超伝導体: "border-fuchsia-300 bg-gradient-to-br from-fuchsia-950 to-indigo-950 text-fuchsia-100",
+  ゴミ: "border-gray-400/50 bg-gray-700/60 text-gray-200",
 };
-const MARKET: { material: MaterialKind; price: number }[] = [{ material: "木材", price: 5 }, { material: "鉄骨", price: 5 }, { material: "コンクリート", price: 5 }, { material: "ガラス", price: 5 }, { material: "銅線", price: 5 }, { material: "合金", price: 7 }, { material: "超伝導体", price: 10 }];
+
+const MARKET: { material: MaterialKind; price: number }[] = [
+  { material: "木材", price: 5 },
+  { material: "鉄骨", price: 5 },
+  { material: "コンクリート", price: 5 },
+  { material: "ガラス", price: 5 },
+  { material: "銅線", price: 5 },
+  { material: "合金", price: 7 },
+  { material: "超伝導体", price: 10 },
+  { material: "ゴミ", price: 1 },
+];
+
 const TARGETED_EFFECTS: EffectType[] = ["stealCoins", "discard"];
 const SESSION_KEY = "balku-room-session";
 const TUTORIAL_KEY = "balku-tutorial-seen";
@@ -32,7 +50,7 @@ function scoreOf(player: Player | undefined) { return (player?.submitted ?? []).
 function toCutIn(entry: RoomState["logs"][number] | undefined): CutIn | null {
   if (!entry) return null;
   const detail = entry.text; const base = { logId: entry.id, detail };
-  if (detail.includes("強制BALKU発動")) return { ...base, eyebrow: "EMERGENCY INSPECTION", title: "強制 BALKU", tone: "danger", marker: "inspect" };
+  if (detail.includes("強制BALKU発動")) return { ...base, eyebrow: "EMERGENCY INSPECTION", title: "確定BALKU", tone: "danger", marker: "inspect" };
   if (detail.includes("BALKU成功")) return { ...base, eyebrow: "INSPECTION CLEAR", title: "違法建築を接収", tone: "good", marker: "inspect" };
   if (detail.includes("BALKU失敗")) return { ...base, eyebrow: "INSPECTION BACKFIRE", title: "BALKU 失敗", tone: "danger", marker: "inspect" };
   if (detail.includes("自動オークション成立")) return { ...base, eyebrow: "MARKET SETTLED", title: "落札成立", tone: "good", marker: "market" };
@@ -73,7 +91,7 @@ function CardPreview({ card, open, onOpenChange, onSell }: { card: Card | null; 
 function SubmittedPile({ submission, owner, isSelf, onBulk, onForceBulk, hasForceBulk }: { submission: Submission; owner: Player; isSelf: boolean; onBulk?: () => void; onForceBulk?: () => void; hasForceBulk: boolean }) {
   const hidden = !submission.faceUp && !isSelf;
   const canBulk = !isSelf && !owner.eliminated && (!submission.faceUp || !submission.effectActivated);
-  return <div data-card-action="construction-land" className={`balku-pile-enter relative w-[146px] ${hidden ? "hazard-card" : ""}`}><div className="absolute inset-x-2 top-[10px] h-[100px] rounded border border-[#9d7344] bg-[#9b633e] shadow-sm" /><div className={`relative min-h-[120px] rounded border-2 p-3 shadow-lg ${hidden ? "border-[#f2c94c] bg-[#182930] text-[#f4ead1]" : submission.legal ? "border-[#2698b5] bg-[#f2e6cc] text-[#1d3138]" : "border-[#e36a61] bg-[#f5dfd5] text-[#2f2020]"}`}><p className={`text-[9px] font-bold tracking-[0.1em] ${hidden ? "text-[#f2c94c]" : submission.legal ? "text-[#24677d]" : "text-red-600"}`}>{hidden ? "非開示企画 / HIDDEN" : submission.legal ? "承認済み / APPROVED" : "違法疑義 / RISK"}</p><p className="mt-2 text-[15px] font-bold leading-tight">{hidden ? "企画書 — 非開示" : submission.project.name}</p><p className="mt-3 text-[10px] opacity-70">添付素材 {submission.materialCount} 枚</p>{!hidden && <p className="mt-1 font-display text-[22px] font-bold text-[#b95037]">{submission.project.points} PT</p>}{canBulk && <div className="mt-3 grid gap-1.5"><button type="button" onClick={onBulk} className="w-full rounded bg-[#f2c94c] px-2 py-1.5 text-[11px] font-bold text-[#172329] transition hover:bg-[#ffdb67] active:scale-95">BALKU</button>{hasForceBulk && <button type="button" onClick={onForceBulk} className="w-full rounded bg-[#dd5a51] px-2 py-1.5 text-[10px] font-bold text-white transition hover:bg-[#ef756c] active:scale-95">強制BALKU</button>}</div>}</div></div>;
+  return <div data-card-action="construction-land" className={`balku-pile-enter relative w-[146px] ${hidden ? "hazard-card" : ""}`}><div className="absolute inset-x-2 top-[10px] h-[100px] rounded border border-[#9d7344] bg-[#9b633e] shadow-sm" /><div className={`relative min-h-[120px] rounded border-2 p-3 shadow-lg ${hidden ? "border-[#f2c94c] bg-[#182930] text-[#f4ead1]" : submission.legal ? "border-[#2698b5] bg-[#f2e6cc] text-[#1d3138]" : "border-[#e36a61] bg-[#f5dfd5] text-[#2f2020]"}`}><p className={`text-[9px] font-bold tracking-[0.1em] ${hidden ? "text-[#f2c94c]" : submission.legal ? "text-[#24677d]" : "text-red-600"}`}>{hidden ? "非開示企画 / HIDDEN" : submission.legal ? "承認済み / APPROVED" : "違法疑義 / RISK"}</p><p className="mt-2 text-[15px] font-bold leading-tight">{hidden ? "企画書 — 非開示" : submission.project.name}</p><p className="mt-3 text-[10px] opacity-70">添付素材 {submission.materialCount} 枚</p>{!hidden && <p className="mt-1 font-display text-[22px] font-bold text-[#b95037]">{submission.project.points} PT</p>}{canBulk && <div className="mt-3 grid gap-1.5"><button type="button" onClick={onBulk} className="w-full rounded bg-[#f2c94c] px-2 py-1.5 text-[11px] font-bold text-[#172329] transition hover:bg-[#ffdb67] active:scale-95">BALKU</button>{hasForceBulk && <button type="button" onClick={onForceBulk} className="w-full rounded bg-[#dd5a51] px-2 py-1.5 text-[10px] font-bold text-white transition hover:bg-[#ef756c] active:scale-95">確定BALKU</button>}</div>}</div></div>;
 }
 
 function Tutorial({ onClose }: { onClose: () => void }) {
@@ -84,9 +102,187 @@ function Tutorial({ onClose }: { onClose: () => void }) {
 }
 
 function Lobby({ onSession }: { onSession: (value: Session) => void }) {
-  const [name, setName] = useState(""); const [roomCode, setRoomCode] = useState(""); const [maxPlayers, setMaxPlayers] = useState(4); const [showTutorial, setShowTutorial] = useState(() => new URLSearchParams(window.location.search).has("tutorial"));
-  const createRoom = trpc.balku.createRoom.useMutation({ onSuccess: onSession, onError: (error) => toast.error(error.message) }); const joinRoom = trpc.balku.joinRoom.useMutation({ onSuccess: onSession, onError: (error) => toast.error(error.message) }); const busy = createRoom.isPending || joinRoom.isPending;
-  return <main className="min-h-screen bg-[#07151b] text-[#edf0e4]"><div className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-10"><div className="desk-art absolute inset-0" /><div className="blueprint-grid absolute inset-0 opacity-25" /><div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-between"><header className="flex items-start justify-between border-b border-[#72cfe5]/20 pb-5"><div className="flex items-center gap-3"><img src="/manus-storage/balku-logo-mark_b603e974.png" alt="BALKU" className="h-14 w-14 object-contain" /><div><p className="font-display text-4xl font-bold leading-none tracking-tight">BALKU</p><p className="mt-1 text-[10px] font-bold tracking-[0.16em] text-[#39bfe8]">BUILDER / ONLINE FIELD TEST</p></div></div><button type="button" onClick={() => setShowTutorial(true)} className="rounded border border-[#39bfe8]/45 bg-[#102b33]/80 px-3 py-2 text-xs font-bold text-[#91e2f4]"><BookOpen className="mr-1 inline h-3.5 w-3.5" />ルール確認</button></header><section className="grid gap-8 py-12 lg:grid-cols-[1.05fr_.95fr] lg:items-center"><div><p className="text-xs font-bold tracking-[0.18em] text-[#39bfe8]">BUILD ・ INSPECT ・ OUTBID</p><h1 className="mt-4 max-w-xl font-display text-6xl font-bold leading-[0.82] tracking-tight text-[#f4ead1] sm:text-7xl">図面どおりか。<br /><span className="text-[#f2c94c]">最後まで、</span><br />BALKUする。</h1><p className="mt-7 max-w-lg leading-7 text-[#b6c7c9]">素材を集め、企画書を積み、疑わしければ検査を仕掛ける。山札が尽きた時、最も強い施工計画が決まります。</p></div><section className="rounded-xl border border-[#61cce5]/35 bg-[#10262d]/95 p-5 shadow-[0_25px_70px_rgba(0,0,0,0.45)] sm:p-7"><div className="flex items-center gap-2 text-[#f4ead1]"><Users size={18} className="text-[#39bfe8]" /><h2 className="font-display text-2xl font-bold">現場に入る</h2></div><label className="mt-6 block text-xs font-bold tracking-wide text-[#8eb6bd]">ユーザー名</label><input value={name} onChange={(event) => setName(event.target.value)} maxLength={24} placeholder="例：赤坂建設" className="mt-2 w-full rounded border border-[#6ea6b1]/40 bg-[#08171c] px-4 py-3 text-[#f4ead1] outline-none placeholder:text-[#587176] focus:border-[#39bfe8]" /><div className="mt-6 grid gap-3 sm:grid-cols-3">{[2, 3, 4].map((count) => <button key={count} type="button" onClick={() => setMaxPlayers(count)} className={`rounded border px-3 py-2 text-sm font-bold ${maxPlayers === count ? "border-[#39bfe8] bg-[#39bfe8]/15 text-[#8be0f8]" : "border-white/10 text-[#90a8ab]"}`}>{count}人卓</button>)}</div><button type="button" disabled={busy || !name.trim()} onClick={() => createRoom.mutate({ displayName: name, maxPlayers })} className="mt-4 flex w-full items-center justify-center gap-2 rounded bg-[#39bfe8] px-4 py-3.5 font-bold text-[#0b2027] disabled:cursor-not-allowed disabled:opacity-40"><Plus size={18} />新しい現場を作成</button><div className="my-6 flex items-center gap-3 text-[10px] font-bold tracking-widest text-[#638087]"><span className="h-px flex-1 bg-white/10" />または参加<span className="h-px flex-1 bg-white/10" /></div><div className="flex gap-2"><input value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6))} placeholder="ルームコード 6文字" className="min-w-0 flex-1 rounded border border-[#6ea6b1]/40 bg-[#08171c] px-4 py-3 font-mono tracking-[0.13em] text-[#f4ead1] outline-none" /><button type="button" disabled={busy || !name.trim() || roomCode.length !== 6} onClick={() => joinRoom.mutate({ code: roomCode, displayName: name })} className="rounded bg-[#f2c94c] px-4 font-bold text-[#15262a] disabled:cursor-not-allowed disabled:opacity-40"><ArrowRight size={20} /></button></div></section></section><footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#72cfe5]/20 pt-5 text-[11px] text-[#7fa0a6]"><span>FIELD TEST / ルーム内の状態は数秒以内に更新されます</span><span>山札消尽で最終精算。素材不足の提出には検査リスク。</span></footer></div></div>{showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}</main>;
+  const [name, setName] = useState("");
+  const [roomCode, setRoomCode] = useState("");
+  const [maxPlayers, setMaxPlayers] = useState(4);
+  const [showTutorial, setShowTutorial] = useState(() => new URLSearchParams(window.location.search).has("tutorial"));
+  const [isPublic, setIsPublic] = useState(true);
+  const [showPublicRooms, setShowPublicRooms] = useState(false);
+
+  const getPublicRooms = trpc.balku.getPublicRooms.useQuery(undefined, {
+    enabled: showPublicRooms,
+    refetchInterval: 3000,
+  });
+
+  const createRoom = trpc.balku.createRoom.useMutation({ onSuccess: onSession, onError: (error) => toast.error(error.message) });
+  const joinRoom = trpc.balku.joinRoom.useMutation({ onSuccess: onSession, onError: (error) => toast.error(error.message) });
+  const busy = createRoom.isPending || joinRoom.isPending;
+
+  return (
+    <main className="min-h-screen bg-[#07151b] text-[#edf0e4]">
+      <div className="relative min-h-screen overflow-hidden px-5 py-8 sm:px-10">
+        <div className="desk-art absolute inset-0" />
+        <div className="blueprint-grid absolute inset-0 opacity-25" />
+        <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-between">
+          <header className="flex items-start justify-between border-b border-[#72cfe5]/20 pb-5">
+            <div className="flex items-center gap-3">
+              <img src="/manus-storage/balku-logo-mark_b603e974.png" alt="BALKU" className="h-14 w-14 object-contain" />
+              <div>
+                <p className="font-display text-4xl font-bold leading-none tracking-tight">BALKU</p>
+                <p className="mt-1 text-[10px] font-bold tracking-[0.16em] text-[#39bfe8]">BUILDER / ONLINE FIELD TEST</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setShowTutorial(true)} className="rounded border border-[#39bfe8]/45 bg-[#102b33]/80 px-3 py-2 text-xs font-bold text-[#91e2f4]">
+              <BookOpen className="mr-1 inline h-3.5 w-3.5" />ルール確認
+            </button>
+          </header>
+
+          <section className="grid gap-8 py-12 lg:grid-cols-[1.05fr_.95fr] lg:items-center">
+            <div>
+              <p className="text-xs font-bold tracking-[0.18em] text-[#39bfe8]">BUILD ・ INSPECT ・ OUTBID</p>
+              <h1 className="mt-4 max-w-xl font-display text-6xl font-bold leading-[0.82] tracking-tight text-[#f4ead1] sm:text-7xl">
+                図面どおりか。<br /><span className="text-[#f2c94c]">BALKU</span><br />違法建築を見抜け
+              </h1>
+              <p className="mt-7 max-w-lg leading-7 text-[#b6c7c9]">
+                素材を集め、企画書を積み、疑わしければ検査を仕掛ける。山札が尽きた時、一番ポイントを持ったものが勝利。
+              </p>
+            </div>
+
+            <section className="rounded-xl border border-[#61cce5]/35 bg-[#10262d]/95 p-5 shadow-[0_25px_70px_rgba(0,0,0,0.45)] sm:p-7">
+              <div className="flex items-center gap-2 text-[#f4ead1]">
+                <Users size={18} className="text-[#39bfe8]" />
+                <h2 className="font-display text-2xl font-bold">現場に入る</h2>
+              </div>
+              
+              <label className="mt-6 block text-xs font-bold tracking-wide text-[#8eb6bd]">ユーザー名</label>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                maxLength={24}
+                placeholder="例：〇〇建設"
+                className="mt-2 w-full rounded border border-[#6ea6b1]/40 bg-[#08171c] px-4 py-3 text-[#f4ead1] outline-none placeholder:text-[#587176] focus:border-[#39bfe8]"
+              />
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                {[2, 3, 4].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setMaxPlayers(count)}
+                    className={`rounded border px-3 py-2 text-sm font-bold ${maxPlayers === count ? "border-[#39bfe8] bg-[#39bfe8]/15 text-[#8be0f8]" : "border-white/10 text-[#90a8ab]"}`}
+                  >
+                    {count}人卓
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isPublic"
+                  checked={isPublic}
+                  onChange={(e) => setIsPublic(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-600 bg-[#08171c] text-[#39bfe8] focus:ring-[#39bfe8]"
+                />
+                <label htmlFor="isPublic" className="text-xs font-bold text-[#90a8ab] cursor-pointer select-none">
+                  公開ルームとして作成する
+                </label>
+              </div>
+
+              <button
+                type="button"
+                disabled={busy || !name.trim()}
+                onClick={() => createRoom.mutate({ displayName: name, maxPlayers, isPublic })}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded bg-[#39bfe8] px-4 py-3.5 font-bold text-[#0b2027] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Plus size={18} />新しい現場を作成
+              </button>
+
+              <div className="my-4 flex items-center gap-2 text-[10px] font-bold tracking-widest text-[#638087]">
+                <span className="h-px flex-1 bg-white/10" />
+                または参加
+                <span className="h-px flex-1 bg-white/10" />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPublicRooms(true)}
+                className="mb-4 flex w-full items-center justify-center gap-2 rounded border border-[#39bfe8]/50 bg-[#39bfe8]/10 px-4 py-2.5 text-sm font-bold text-[#8fe0f8] hover:bg-[#39bfe8]/20"
+              >
+                <Globe size={16} />公開ルーム一覧を見る
+              </button>
+
+              <div className="flex gap-2">
+                <input
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6))}
+                  placeholder="ルームコード 6文字"
+                  className="min-w-0 flex-1 rounded border border-[#6ea6b1]/40 bg-[#08171c] px-4 py-3 font-mono tracking-[0.13em] text-[#f4ead1] outline-none"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !name.trim() || roomCode.length !== 6}
+                  onClick={() => joinRoom.mutate({ code: roomCode, displayName: name })}
+                  className="rounded bg-[#f2c94c] px-4 font-bold text-[#15262a] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ArrowRight size={20} />
+                </button>
+              </div>
+            </section>
+          </section>
+
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#72cfe5]/20 pt-5 text-[11px] text-[#7fa0a6]">
+            <span>FIELD TEST / ルーム内の状態は数秒以内に更新されます</span>
+            <span>山札消尽で最終精算。</span>
+          </footer>
+        </div>
+      </div>
+
+      <Dialog open={showPublicRooms} onOpenChange={setShowPublicRooms}>
+        <DialogContent className="max-w-md border-[#39bfe8]/60 bg-[#10262d] text-[#edf0e4]">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl text-[#f4ead1]">公開中の現場一覧</DialogTitle>
+            <DialogDescription className="text-[#a9c3c7]">参加可能な現場を選択してください。</DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2 max-h-60 overflow-y-auto space-y-2 pr-1">
+            {getPublicRooms.isLoading ? (
+              <p className="py-4 text-center text-xs text-[#81abb3]">現場一覧を読み込み中…</p>
+            ) : getPublicRooms.data && getPublicRooms.data.length > 0 ? (
+              getPublicRooms.data.map((room) => (
+                <div
+                  key={room.code}
+                  className="flex items-center justify-between rounded border border-white/10 bg-[#08171c] p-3 text-sm"
+                >
+                  <div>
+                    <span className="font-mono font-bold tracking-wider text-[#39bfe8]">{room.code}</span>
+                    <span className="ml-3 text-xs text-[#81abb3]">
+                      {room.playerCount} / {room.maxPlayers}人
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || !name.trim() || room.playerCount >= room.maxPlayers}
+                    onClick={() => {
+                      setShowPublicRooms(false);
+                      joinRoom.mutate({ code: room.code, displayName: name });
+                    }}
+                    className="rounded bg-[#f2c94c] px-3 py-1.5 text-xs font-bold text-[#15262a] disabled:opacity-40"
+                  >
+                    参加
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="py-4 text-center text-xs text-[#81abb3]">現在参加可能な公開現場はありません。</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
+    </main>
+  );
 }
 
 function OnlineRoom({ session, leave }: { session: Session; leave: () => void }) {
@@ -114,8 +310,25 @@ function OnlineRoom({ session, leave }: { session: Session; leave: () => void })
 
 export default function Home() {
   const [session, setSession] = useState<Session | null>(readSession);
-  useEffect(() => { if (session) window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); }, [session]);
-  const enter = (next: Session) => { window.history.replaceState({}, "", `/?room=${next.code}`); setSession(next); };
-  const leave = () => { window.sessionStorage.removeItem(SESSION_KEY); window.history.replaceState({}, "", "/"); setSession(null); };
+  const utils = trpc.useUtils();
+
+  useEffect(() => {
+    if (session) window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  }, [session]);
+
+  const enter = (next: Session) => {
+    window.history.replaceState({}, "", `/?room=${next.code}`);
+    setSession(next);
+  };
+
+  const leave = () => {
+    if (session) {
+      utils.balku.leaveRoom.mutate({ code: session.code, playerToken: session.playerToken }).catch(() => {});
+    }
+    window.sessionStorage.removeItem(SESSION_KEY);
+    window.history.replaceState({}, "", "/");
+    setSession(null);
+  };
+
   return session ? <OnlineRoom session={session} leave={leave} /> : <Lobby onSession={enter} />;
 }
