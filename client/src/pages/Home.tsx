@@ -301,3 +301,633 @@ function Lobby({ onSession }: { onSession: (value: Session) => void }) {
     </main>
   );
 }
+
+function OnlineRoom({ session, leave }: { session: Session; leave: () => void }) {
+  const utils = trpc.useUtils();
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [selectedMaterials, setSelectedMaterials] = useState<string[]>([]);
+  const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
+  const [tutorial, setTutorial] = useState(() => window.sessionStorage.getItem(TUTORIAL_KEY) !== "1");
+  const [cutIn, setCutIn] = useState<CutIn | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const [shopOpen, setShopOpen] = useState(false);
+  const [previewCard, setPreviewCard] = useState<Card | null>(null);
+  const [draggingCard, setDraggingCard] = useState<string | null>(null);
+  const [saleFlash, setSaleFlash] = useState(false);
+  const [startTransition, setStartTransition] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(() => window.sessionStorage.getItem(SOUND_MUTE_KEY) === "1");
+  const [lastActionType, setLastActionType] = useState<string | null>(null);
+  const [shakeSubmissionId, setShakeSubmissionId] = useState<string | null>(null);
+  const [coinPop, setCoinPop] = useState<{ amount: number; key: number } | null>(null);
+  const seenLogIds = useRef<Set<string> | null>(null);
+  const lastRoomRevision = useRef<number | null>(null);
+  const previousPhase = useRef<RoomState["phase"] | null>(null);
+  const previousCoins = useRef<number | null>(null);
+  const previousHandCount = useRef<number | null>(null);
+  const previousDeckCount = useRef<number | null>(null);
+  const actionButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // ★ 改善: 高頻度ポーリング（800ms）+ staleTime=0 + 即時invalidate
+  const room = trpc.balku.getRoom.useQuery(session, {
+    refetchInterval: 800,
+    retry: false,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    networkMode: "always",
+  });
+
+  const move = trpc.balku.move.useMutation({
+    onSuccess: () => {
+      utils.balku.getRoom.invalidate(session);
+      Sound.play("submit");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+      Sound.play("error");
+      utils.balku.getRoom.invalidate(session);
+    },
+  });
+
+  const start = trpc.balku.startGame.useMutation({
+    onSuccess: () => {
+      utils.balku.getRoom.invalidate(session);
+      Sound.play("turnStart");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+      Sound.play("error");
+    },
+  });
+
+  const restart = trpc.balku.restartGame.useMutation({
+    onSuccess: () => {
+      utils.balku.getRoom.invalidate(session);
+      Sound.play("turnStart");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+      Sound.play("error");
+    },
+  });
+
+  // ★ 改善: leaveRoom を onSettled で必ずクリーンアップ
+  const leaveMutation = trpc.balku.leaveRoom.useMutation({
+    onSettled: () => {
+      window.sessionStorage.removeItem(SESSION_KEY);
+      window.history.replaceState({}, "", "/");
+      leave();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+      Sound.play("error");
+    },
+  });
+
+  const data = room.data as unknown as {
+    code: string;
+    status: "lobby" | "active" | "finished";
+    revision: number;
+    maxPlayers: number;
+    player: { seat: number; displayName: string; isHost: boolean };
+    state: RoomState;
+  } | undefined;
+
+  const state = data?.state;
+  const ownSeat = data?.player.seat ?? -1;
+  const me = state?.players.find((player) => player.seat === ownSeat);
+  const active = state?.players.find((player) => player.seat === state.activeSeat);
+  const isTurn = state?.phase === "active" && state.activeSeat === ownSeat && !me?.eliminated;
+  const opponents = state?.players.filter((player) => player.seat !== ownSeat) ?? [];
+  const selectedProject = me?.hand.find((card) => card.id === selectedPlan && card.kind === "project");
+  const requiresTarget = selectedProject ? TARGETED_EFFECTS.includes(selectedProject.effect?.type ?? "coins") : false;
+  const handKey = useMemo(() => me?.hand.map((card) => card.id).join("|") ?? "", [me?.hand]);
+  const sortedHand = useMemo(() => sortHandCards(me?.hand ?? []), [me?.hand]);
+  const forceCharges = me?.forceBulkCharges ?? [];
+  const forceCharge = forceCharges.find((charge) => !charge.used);
+  const usedForceCharges = forceCharges.filter((charge) => charge.used).length;
+  const isFinished = state?.phase === "finished";
+  const sellSelection = [...(selectedPlan ? [selectedPlan] : []), ...selectedMaterials];
+  const endgame = !isFinished && (state?.deckCount ?? 99) <= 10;
+
+  // サウンドミュート同期
+  useEffect(() => {
+    Sound.setMute(soundMuted);
+    window.sessionStorage.setItem(SOUND_MUTE_KEY, soundMuted ? "1" : "0");
+  }, [soundMuted]);
+
+  // 手札変更時に選択解除
+  useEffect(() => { setSelectedPlan(null); setSelectedMaterials([]); setSelectedTarget(null); }, [handKey]);
+
+  // フェーズ遷移アニメーション
+  useEffect(() => {
+    if (previousPhase.current === "lobby" && state?.phase === "active") {
+      setStartTransition(true);
+      Sound.play("turnStart");
+      const timer = window.setTimeout(() => setStartTransition(false), 840);
+      previousPhase.current = state.phase;
+      return () => window.clearTimeout(timer);
+    }
+    if (state?.phase) previousPhase.current = state.phase;
+  }, [state?.phase]);
+
+  // ★ 改善: ログ・リビジョン監視で効果音・カットイン・アニメーションを発火
+  useEffect(() => {
+    const logs = state?.logs ?? [];
+    if (!data || !logs.length) return;
+    if (seenLogIds.current === null || lastRoomRevision.current === null) {
+      seenLogIds.current = new Set(logs.map((entry) => entry.id));
+      lastRoomRevision.current = data.revision;
+      return;
+    }
+    if (lastRoomRevision.current === data.revision) return;
+    lastRoomRevision.current = data.revision;
+
+    const unseen = logs.filter((entry) => !seenLogIds.current!.has(entry.id));
+    if (!unseen.length) return;
+    unseen.forEach((entry) => seenLogIds.current!.add(entry.id));
+
+    // 効果音発火
+    unseen.forEach((entry) => {
+      if (entry.text.includes("BALKU成功")) Sound.play("bulkSuccess");
+      else if (entry.text.includes("BALKU失敗")) Sound.play("bulkFail");
+      else if (entry.text.includes("強制BALKU")) Sound.play("forceBulk");
+      else if (entry.text.includes("自動オークション")) Sound.play("auction");
+      else if (entry.text.includes("売却")) Sound.play("sell");
+      else if (entry.text.includes("直接獲得")) Sound.play("shop");
+      else if (entry.text.includes("公開で") || entry.text.includes("伏せ企画")) Sound.play("submit");
+      else if (entry.text.includes("脱落")) Sound.play("eliminate");
+      else if (entry.text.includes("山札消尽")) Sound.play("win");
+    });
+
+    // カットイン選出
+    const candidates = unseen.map(toCutIn).filter((entry): entry is CutIn => entry !== null);
+    const nextCutIn = candidates.find((entry) => ["確定BALKU", "違法建築を接収", "BALKU 失敗", "落札成立", "入札なし・取り下げ", "最終精算", "施工者脱落"].includes(entry.title)) ?? candidates[0];
+    if (!nextCutIn) return;
+    setCutIn(nextCutIn);
+    const timer = window.setTimeout(() => setCutIn((current) => current?.logId === nextCutIn.logId ? null : current), 2600);
+    return () => window.clearTimeout(timer);
+  }, [data?.revision, state?.logs]);
+
+  // ★ 改善: コイン変動検知でポップアニメーション
+  useEffect(() => {
+    if (me && previousCoins.current !== null && me.coins !== previousCoins.current) {
+      const diff = me.coins - previousCoins.current;
+      setCoinPop({ amount: diff, key: Date.now() });
+      if (diff > 0) Sound.play("coin");
+      const timer = window.setTimeout(() => setCoinPop(null), 800);
+      return () => window.clearTimeout(timer);
+    }
+    previousCoins.current = me?.coins ?? null;
+  }, [me?.coins]);
+
+  // ★ 改善: ドロー検知でアニメーション
+  useEffect(() => {
+    if (me && previousHandCount.current !== null && me.hand.length > previousHandCount.current) {
+      Sound.play("cardDraw");
+    }
+    previousHandCount.current = me?.hand.length ?? null;
+  }, [me?.hand.length]);
+
+  // ★ 改善: 山札残り10枚以下で警告音（1回のみ）
+  useEffect(() => {
+    if (state?.deckCount !== undefined && previousDeckCount.current !== null && state.deckCount <= 10 && previousDeckCount.current > 10) {
+      Sound.play("alert");
+    }
+    previousDeckCount.current = state?.deckCount ?? null;
+  }, [state?.deckCount]);
+
+  // ターンタイマー
+  useEffect(() => {
+    if (!state?.turnDeadlineAt || state.phase !== "active") return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [state?.phase, state?.turnDeadlineAt]);
+
+  const apply = useCallback((action: unknown) => {
+    if (data) {
+      setLastActionType((action as { type: string }).type);
+      move.mutate({ code: session.code, playerToken: session.playerToken, expectedRevision: data.revision, action: action as never });
+    }
+  }, [data, move, session]);
+
+  const closeTutorial = () => { window.sessionStorage.setItem(TUTORIAL_KEY, "1"); setTutorial(false); };
+
+  const toggleCard = (card: Card) => {
+    if (!isTurn || me?.actionUsed || isFinished) return;
+    if (card.kind === "project") {
+      setSelectedPlan((value) => value === card.id ? null : card.id);
+      setSelectedTarget(null);
+      Sound.play("cardPlay");
+    } else {
+      setSelectedMaterials((value) => value.includes(card.id) ? value.filter((id) => id !== card.id) : [...value, card.id]);
+      Sound.play("cardPlay");
+    }
+  };
+
+  const addBuildMaterial = (id: string) => {
+    const card = me?.hand.find((item) => item.id === id);
+    if (!selectedProject || card?.kind !== "material") return;
+    setSelectedMaterials((value) => value.includes(id) ? value : [...value, id]);
+    Sound.play("cardPlay");
+  };
+
+  const startCardDrag = (card: Card) => (event: DragEvent<HTMLButtonElement>) => {
+    if (!isTurn || me?.actionUsed) { event.preventDefault(); return; }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", card.id);
+    setDraggingCard(card.id);
+    Sound.play("hover");
+  };
+
+  const readDragCard = (event: DragEvent<HTMLElement>) => event.dataTransfer.getData("text/plain");
+
+  const sellCards = (ids: string[]) => {
+    const unique = Array.from(new Set(ids));
+    if (!isTurn || !unique.length || move.isPending) return;
+    setSaleFlash(true);
+    Sound.play("sell");
+    window.setTimeout(() => setSaleFlash(false), 450);
+    if (unique.includes(selectedPlan ?? "")) setSelectedPlan(null);
+    setSelectedMaterials((value) => value.filter((id) => !unique.includes(id)));
+    apply({ type: "sellCards", cardIds: unique });
+  };
+
+  const submitProject = (faceUp: boolean) => {
+    if (!selectedProject) return;
+    Sound.play("submit");
+    apply({ type: "submit", projectId: selectedProject.id, materialIds: selectedMaterials, faceUp, ...(selectedTarget !== null ? { targetSeat: selectedTarget } : {}) });
+  };
+
+  const handleLeave = () => {
+    if (!data) {
+      leave();
+      return;
+    }
+    Sound.play("error");
+    leaveMutation.mutate({ code: session.code, playerToken: session.playerToken, expectedRevision: data.revision });
+  };
+
+  // BALKU被弾アニメーション
+  const triggerBulkShake = (submissionId: string) => {
+    setShakeSubmissionId(submissionId);
+    window.setTimeout(() => setShakeSubmissionId(null), 600);
+  };
+
+  if (room.isLoading || !data || !state) return <main className="grid min-h-screen place-items-center bg-[#07151b] text-[#c7d9dc]"><div className="text-center"><div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[#39bfe8] border-t-transparent" /><p className="mt-4 text-sm">現場図面を読み込んでいます…</p></div></main>;
+  if (room.isError) return <main className="grid min-h-screen place-items-center bg-[#07151b] p-6 text-[#e6efee]"><div className="max-w-md rounded-lg border border-red-400/50 bg-[#1c2c30] p-7 text-center"><AlertTriangle className="mx-auto text-red-400" /><h1 className="mt-4 font-display text-3xl font-bold">現場に接続できません</h1><button type="button" onClick={leave} className="mt-6 rounded bg-[#f2c94c] px-4 py-2 font-bold text-[#19292e] transition hover:brightness-110 active:scale-95">入口へ戻る</button></div></main>;
+
+  if (state.phase === "lobby") return (
+    <main className="min-h-screen bg-[#07151b] p-5 text-[#edf0e4] sm:p-10">
+      <div className="desk-art fixed inset-0 opacity-30" />
+      <section className="relative mx-auto max-w-4xl rounded-xl border border-[#39bfe8]/35 bg-[#10262d]/95 p-6 shadow-2xl sm:p-10">
+        <header className="flex flex-wrap items-start justify-between gap-5 border-b border-white/10 pb-6">
+          <div className="flex gap-3">
+            <img src="/manus-storage/balku-logo-mark_b603e974.png" alt="BALKU" className="h-14 w-14" />
+            <div>
+              <p className="font-display text-4xl font-bold leading-none">BALKU</p>
+              <p className="mt-1 text-xs tracking-widest text-[#39bfe8]">LOBBY / FIELD BRIEFING</p>
+            </div>
+          </div>
+          <button type="button" onClick={handleLeave} className="rounded border border-white/15 p-2 text-[#9eb4b8] transition hover:bg-white/10 hover:text-white" title="入口へ戻る"><LogOut size={18} /></button>
+        </header>
+        <div className="mt-8 grid gap-8 md:grid-cols-[1fr_0.9fr]">
+          <div>
+            <p className="text-xs font-bold tracking-widest text-[#82cbe0]">ROOM CODE</p>
+            <div className="mt-2 flex items-center gap-3">
+              <strong className="block font-display text-6xl tracking-[0.1em] text-[#f4ead1]">{data.code}</strong>
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(data.code); toast.success("ルームコードをコピーしました"); }}
+                className="rounded border border-white/15 p-2 text-[#9eb4b8] transition hover:bg-white/10"
+                title="コードをコピー"
+              >
+                <Copy size={18} />
+              </button>
+            </div>
+            <p className="mt-5 max-w-sm leading-7 text-sm text-[#b2c4c6]">コードを共有して仲間を呼び込んでください。作成者が開始を押すと施工競争が始まります。</p>
+          </div>
+          <div>
+            <p className="text-xs font-bold tracking-widest text-[#82cbe0]">現場参加者 {state.players.length} / {data.maxPlayers}</p>
+            <div className="mt-3 space-y-2">
+              {state.players.map((player) => (
+                <div key={player.seat} className={`lobby-player-enter flex items-center justify-between rounded border border-white/10 bg-[#09191e] px-4 py-3 transition hover:border-white/20`} style={{ animationDelay: `${player.seat * 100}ms` }}>
+                  <span className="flex items-center gap-3 font-bold"><CircleDot size={16} className={player.seat === 0 ? "text-[#39bfe8]" : "text-[#f2c94c]"} />{player.name}</span>
+                  <span className="text-xs text-[#81abb3]">施工準備中</span>
+                </div>
+              ))}
+            </div>
+            {data.player.isHost ? (
+              <button type="button" disabled={state.players.length < 2 || start.isPending} onClick={() => start.mutate({ code: session.code, playerToken: session.playerToken, expectedRevision: data.revision })} className="mt-5 flex w-full items-center justify-center gap-2 rounded bg-[#39bfe8] px-4 py-3.5 font-bold text-[#0a2027] disabled:cursor-not-allowed disabled:opacity-40 transition hover:brightness-110 active:scale-[0.98]">
+                <Play size={18} fill="currentColor" />施工を開始する
+              </button>
+            ) : (
+              <div className="mt-5 rounded border border-[#39bfe8]/30 bg-[#39bfe8]/10 px-4 py-4 text-center text-sm text-[#92dff1]">作成者が施工開始を操作するのを待っています。</div>
+            )}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+
+  const activeIncome = me?.submitted.filter((submission) => submission.legal && submission.effectActivated && submission.project.effect?.type === "income").length ?? 0;
+  const winningSeats = state.winnerSeats ?? (state.winnerSeat === null || state.winnerSeat === undefined ? [] : [state.winnerSeat]);
+  const finalScores = state.finalScores ?? [];
+  const ownWins = winningSeats.includes(ownSeat);
+  const sharedWin = winningSeats.length > 1;
+  const secondsLeft = state.turnDeadlineAt ? Math.max(0, Math.ceil((state.turnDeadlineAt - clockNow) / 1000)) : 0;
+  const urgent = secondsLeft <= 10;
+  const auctionSeconds = state.auction?.deadlineAt ? Math.max(0, Math.ceil((state.auction.deadlineAt - clockNow) / 1000)) : null;
+
+  return (
+    <main className="min-h-screen overflow-x-hidden bg-[#07151b] pb-24 text-[#edf0e4]">
+      <div className="desk-art fixed inset-0 opacity-55" />
+      <div className="blueprint-grid fixed inset-0 opacity-[0.08]" />
+      {startTransition && <div className="balku-start-overlay pointer-events-none fixed inset-0 z-[75] grid place-items-center bg-[#07151b]"><div className="text-center"><Hammer className="mx-auto h-12 w-12 text-[#f2c94c]" /><p className="mt-4 font-display text-5xl tracking-widest text-[#f4ead1]">SITE OPEN</p><p className="mt-2 text-xs font-bold tracking-[0.25em] text-[#39bfe8]">施工図面を展開中</p></div></div>}
+      {cutIn && <GameCutIn cutIn={cutIn} />}
+      <div className="relative mx-auto max-w-[1520px] p-3 sm:p-5">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#72cfe5]/20 pb-3">
+          <div className="flex items-center gap-3">
+            <img src="/manus-storage/balku-logo-mark_b603e974.png" alt="BALKU" className="h-10 w-10" />
+            <div>
+              <p className="font-display text-3xl font-bold leading-none">BALKU</p>
+              <p className="text-[9px] font-bold tracking-[0.16em] text-[#39bfe8]">ROOM {data.code} / HIGH-FREQ SYNC</p>
+            </div>
+          </div>
+          <div className={`turn-indicator-ring rounded border px-4 py-2 text-center transition ${isTurn ? "border-[#39bfe8] bg-[#39bfe8]/10 text-[#8fe2f6] balku-turn-badge" : "border-[#f2c94c]/35 bg-[#f2c94c]/10 text-[#f2d972]"}`}>
+            <p className="text-[10px] font-bold tracking-widest">TURN {String(state.turn).padStart(2, "0")} / DECK {state.deckCount}</p>
+            <p className="text-sm font-bold">{isFinished ? "最終精算 完了" : isTurn ? "あなたの施工ターン" : `${active?.name ?? "参加者"}の施工を待機中`}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setSoundMuted((m) => !m)} className="rounded border border-white/15 p-2 text-[#9ab8bd] transition hover:bg-white/10 hover:text-white" title={soundMuted ? "音声をオン" : "音声をオフ"}>
+              {soundMuted ? <VolumeX size={17} /> : <Volume2 size={17} />}
+            </button>
+            <button type="button" onClick={() => setShopOpen(true)} className="rounded border border-[#f2c94c]/50 bg-[#f2c94c]/10 px-3 py-2 text-xs font-bold text-[#f6da78] transition hover:bg-[#f2c94c]/20 active:scale-95">
+              <ShoppingBag className="mr-1 inline h-4 w-4" />ショップ
+            </button>
+            <button type="button" onClick={() => setTutorial(true)} className="rounded border border-white/15 p-2 text-[#9ab8bd] transition hover:bg-white/10 hover:text-white" title="チュートリアル"><BookOpen size={17} /></button>
+            <button type="button" onClick={handleLeave} className="rounded border border-white/15 p-2 text-[#9ab8bd] transition hover:bg-white/10 hover:text-white" title="退出"><LogOut size={17} /></button>
+          </div>
+        </header>
+
+        {isTurn && (
+          <section className={`mt-3 rounded-lg border p-3 shadow-[0_14px_36px_rgba(0,0,0,0.28)] transition ${urgent ? "balku-timer-urgent border-[#ef756c]" : "border-[#39bfe8]/75 bg-[#12333c]"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className={`text-[10px] font-bold tracking-[0.18em] ${urgent ? "text-[#ffb4ad]" : "text-[#82def3]"}`}>YOUR TURN / ACTION REQUIRED</p>
+                <p className="font-display text-2xl font-bold tracking-wide text-[#f5ead2]">{selectedProject ? "施工ポケットへ素材を納品" : "企画を選ぶ、またはカードを売却"}</p>
+              </div>
+              <div className={`rounded border px-3 py-2 text-center transition ${urgent ? "border-[#ef756c]/60 bg-[#641f25] text-[#ffd7d2] balku-vibrate" : "border-[#78d7ed]/50 bg-[#0c232b] text-[#b8edf7]"}`}>
+                <Clock3 className="mr-1 inline h-4 w-4" /><strong className="font-display text-2xl">{secondsLeft}</strong><span className="ml-1 text-xs">秒</span>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {endgame && (
+          <section className="mt-3 flex items-center gap-3 rounded border border-[#ef756c]/65 bg-[#3a1f20] px-4 py-3 text-[#ffd7d2] balku-danger-pulse">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-[#f2c94c]" />
+            <div>
+              <p className="text-xs font-bold tracking-[0.12em]">FINAL TEN / 通知</p>
+              <p className="text-sm">山札は残り {state.deckCount} 枚。施工と市場の判断を急いでください。</p>
+            </div>
+          </section>
+        )}
+
+        <section className="mt-3 grid gap-3 xl:grid-cols-[220px_minmax(0,1fr)_280px]">
+          <aside className="rounded-lg border border-[#65c6de]/25 bg-[#10262d]/95 p-3 shadow-xl">
+            <p className="text-[10px] font-bold tracking-[0.14em] text-[#39bfe8]">YOUR STATUS</p>
+            <p className="mt-2 font-display text-4xl font-bold text-[#f4ead1]">{scoreOf(me)}<span className="ml-1 text-lg text-[#7d9ba1]">PT</span></p>
+            <div className="relative mt-1 text-sm text-[#f2c94c]">
+              <Coins className="mr-1 inline h-4 w-4" />{me?.coins ?? 0} coins
+              {coinPop && <span key={coinPop.key} className={`score-pop absolute left-full ml-2 ${coinPop.amount > 0 ? "score-pop-up" : "score-pop-down"}`}>{coinPop.amount > 0 ? "+" : ""}{coinPop.amount}</span>}
+            </div>
+            <p className="mt-2 text-[11px] text-[#79d9f2]">残山札 {state.deckCount} / {state.deckInitialCount}</p>
+            {activeIncome > 0 && <p className="mt-2 text-[11px] text-[#72e2a7]"><Sparkles className="mr-1 inline h-3.5 w-3.5" />継続収入 +{activeIncome}</p>}
+            {forceCharges.length > 0 && <p className={`mt-2 text-[11px] ${forceCharge ? "text-[#f1c86b]" : "text-[#9caeb0]"}`}><Zap className="mr-1 inline h-3.5 w-3.5" />確定BALKU {forceCharge ? `使用可能 ${forceCharges.length - usedForceCharges}回` : "使用済み"}</p>}
+          </aside>
+
+          <section className="min-w-0 rounded-lg border border-[#44bad3]/60 bg-[#eee0c0] p-3 text-[#1b3035] shadow-[0_22px_55px_rgba(0,0,0,0.38)]">
+            <div className="flex items-center justify-between border-b border-[#2c94ab]/30 pb-2">
+              <div>
+                <p className="text-[10px] font-bold tracking-[0.13em] text-[#367082]">SITE PLAN / 提出済み企画エリア</p>
+                <p className="font-display text-xl font-bold">現場図面 — FINAL SCORE {state.deckCount === 0 ? "CALCULATING" : "PENDING"}</p>
+              </div>
+              <span className="rounded border border-[#478aa0]/35 px-2 py-1 text-[10px] font-bold text-[#3f7080]">{state.players.filter((player) => !player.eliminated).length} 社 稼働中</span>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              {opponents.map((player) => (
+                <article key={player.seat} className={`rounded border p-2 transition ${player.eliminated ? "balku-eliminate-fade border-red-400/40 bg-red-50/40" : "border-[#477885]/40 bg-[#f8efd9] hover:shadow-md"}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold">{player.name}</span>
+                    <span className="text-xs font-bold text-[#b35b3d]">{scoreOf(player)} PT</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#668087]">企画 {player.submitted.length}件 ・ 手札 {player.handCount}枚 ・ ◉ {player.coins}</p>
+                  <div className="mt-2 flex min-h-[138px] gap-2 overflow-x-auto pb-1">
+                    {player.submitted.length ? player.submitted.map((submission) => (
+                      <SubmittedPile
+                        key={submission.id}
+                        submission={submission}
+                        owner={player}
+                        isSelf={false}
+                        hasForceBulk={Boolean(forceCharge)}
+                        animating={shakeSubmissionId === submission.id}
+                        onBulk={() => { triggerBulkShake(submission.id); apply({ type: "bulkCall", targetSeat: player.seat, submissionId: submission.id }); }}
+                        onForceBulk={() => { if (forceCharge) { triggerBulkShake(submission.id); apply({ type: "forceBulk", chargeId: forceCharge.id, targetSeat: player.seat, submissionId: submission.id }); } }}
+                      />
+                    )) : <div className="grid min-h-[118px] w-full place-items-center rounded border border-dashed border-[#5591a0]/40 text-xs text-[#69878e]">提出企画なし</div>}
+                  </div>
+                </article>
+              ))}
+            </div>
+            <article className={`mt-3 rounded border-2 border-[#2d96af] bg-[#fff5df] p-3 transition ${me?.eliminated ? "balku-eliminate-fade opacity-60" : ""}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-bold tracking-[0.14em] text-[#237187]">YOUR YARD / あなたの施工ヤード</p>
+                  <p className="mt-1 font-display text-2xl font-bold">{me?.name}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-display text-3xl font-bold text-[#b85339]">{scoreOf(me)} PT</p>
+                  <p className="text-[10px] text-[#5f7b83]">企画点 {scoreOf(me) - (me?.scoreBonus ?? 0)} + バフ {me?.scoreBonus ?? 0}</p>
+                </div>
+              </div>
+              <div className="mt-2 flex min-h-[145px] flex-wrap gap-3">
+                {me?.submitted.length ? me.submitted.map((submission) => (
+                  <SubmittedPile key={submission.id} submission={submission} owner={me} isSelf hasForceBulk={false} />
+                )) : <div className="grid w-full place-items-center rounded border border-dashed border-[#4f9db0]/50 text-sm text-[#587b83]">手札から企画と素材を選び、ここへ積みます。</div>}
+              </div>
+            </article>
+          </section>
+
+          <aside className="rounded-lg border border-[#65c6de]/25 bg-[#10262d]/95 p-3 shadow-xl">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold tracking-[0.14em] text-[#39bfe8]">AUTO AUCTION</p>
+              <span className="h-2 w-2 rounded-full bg-[#57db9f] connection-pulse" title="同期中" />
+            </div>
+            {state.auction ? (
+              <section key={`${state.auction.card.id}-${state.auction.highestBid}`} className="balku-auction-bid mt-3 rounded border border-[#f2c94c]/50 bg-[#f2c94c]/10 p-3">
+                <div className="flex items-center gap-2 text-[#f4d873]"><Gavel size={16} /><p className="text-xs font-bold">オークション</p></div>
+                <div className="mt-2"><div key={state.auction.card.id} className="balku-card-deal"><CardFace card={state.auction.card} compact /></div></div>
+                <p className="mt-2 text-xs text-[#b5ccce]">現在額 <strong className="text-[#f4d873]">{state.auction.highestBid}</strong> coin{auctionSeconds !== null ? <> ・ <strong className={auctionSeconds <= 5 ? "text-[#ff9c93]" : "text-[#f4d873]"}>{auctionSeconds}秒</strong></> : "。決済待ち"}</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button type="button" disabled={(me?.coins ?? 0) < state.auction.highestBid + 1 || move.isPending || isFinished} onClick={() => { Sound.play("auction"); apply({ type: "bid", amount: state.auction!.highestBid + 1 }); }} className="rounded bg-[#f2c94c] px-2 py-2 text-xs font-bold text-[#1d2b2d] disabled:opacity-40 transition hover:brightness-110 active:scale-95">+1 入札</button>
+                  <button type="button" disabled={(me?.coins ?? 0) < state.auction.highestBid + 2 || move.isPending || isFinished} onClick={() => { Sound.play("auction"); apply({ type: "bid", amount: state.auction!.highestBid + 2 }); }} className="rounded border border-[#f2c94c]/60 px-2 py-2 text-xs font-bold text-[#f5d873] disabled:opacity-40 transition hover:bg-[#f2c94c]/10 active:scale-95">+2 入札</button>
+                </div>
+              </section>
+            ) : (
+              <section className="mt-3 rounded border border-[#74b0be]/25 bg-black/10 p-3 text-xs leading-5 text-[#a3c0c4]"><Gavel className="mr-2 inline h-4 w-4 text-[#39bfe8]" />次の施工ラウンドでランダムなカードが出品されます。</section>
+            )}
+            <div className="mt-3 max-h-[200px] space-y-2 overflow-y-auto pr-1">
+              {state.logs.map((entry) => (
+                <p key={entry.id} className={`balku-log-pop border-l-2 py-1 pl-3 text-[10px] leading-4 transition ${entry.tone === "good" ? "border-[#58dba1] text-[#9ee7bf]" : entry.tone === "warning" ? "border-[#f2c94c] text-[#f1d879]" : entry.tone === "danger" ? "border-[#e36a61] text-[#f09a91]" : "border-[#4d7780] text-[#9ab7ba]"}`}>
+                  {entry.text}
+                </p>
+              ))}
+            </div>
+          </aside>
+        </section>
+
+        <section id="hand" className="mt-3 rounded-lg border border-[#55bed6]/30 bg-[#0c2027]/95 p-3 shadow-2xl">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold tracking-[0.14em] text-[#39bfe8]">手札 / HAND</p>
+              <p className="mt-1 text-xs text-[#9ab8be]">長押しで詳細を確認。ドラッグで売却・納品。</p>
+            </div>
+            <button type="button" onClick={() => { setSelectedPlan(null); setSelectedMaterials([]); setSelectedTarget(null); Sound.play("cardPlay"); }} className="rounded border border-white/15 p-2 text-[#aac4c8] transition hover:text-white hover:bg-white/10" title="選択解除"><RotateCcw size={15} /></button>
+          </div>
+
+          {selectedProject && (
+            <section onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addBuildMaterial(readDragCard(event)); setDraggingCard(null); }} className={`balku-drop-pocket mt-3 rounded border border-[#39bfe8]/65 bg-[#12323b] p-3 ${draggingCard ? "drop-zone-active" : ""}`} data-over={draggingCard !== null}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold tracking-[0.14em] text-[#80e4f5]">CONSTRUCTION POCKET / 施工ポケット</p>
+                  <p className="font-bold text-[#f4ead1]">{selectedProject.name} <span className="ml-2 text-xs font-normal text-[#9dbfc4]">{requirements(selectedProject)}</span></p>
+                  <p className="mt-1 text-xs text-[#a9c4c7]">素材をここへドラッグ、または手札をタップして納品。</p>
+                </div>
+                <div className="rounded border border-[#39bfe8]/30 bg-black/15 px-3 py-2 text-xs text-[#cbe8eb]">納品素材 {selectedMaterials.length} 枚</div>
+              </div>
+              {requiresTarget && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-bold text-[#f4d873]">対象</span>
+                  {opponents.filter((player) => !player.eliminated).map((player) => (
+                    <button key={player.seat} type="button" onClick={() => { setSelectedTarget(player.seat); Sound.play("cardPlay"); }} className={`rounded px-3 py-1.5 text-xs font-bold transition active:scale-95 ${selectedTarget === player.seat ? "bg-[#f2c94c] text-[#17252a]" : "border border-[#f2c94c]/40 text-[#f5d873] hover:bg-[#f2c94c]/10"}`}>
+                      {player.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); sellCards([readDragCard(event)]); setDraggingCard(null); }} data-card-action="sale-land" className={`balku-drop-pocket flex min-w-[170px] items-center gap-2 rounded border border-[#63d8a2]/60 bg-[#12372b] px-3 py-2 transition ${saleFlash ? "balku-sale-flash" : ""} ${draggingCard ? "drop-zone-active" : ""}`} data-over={draggingCard !== null}>
+                  <PackageOpen className="h-4 w-4 text-[#86edb5]" /><span className="text-[10px] font-bold text-[#d0f4df]">カードを売却 → +1 coin</span>
+                </div>
+                <button ref={actionButtonRef} type="button" disabled={!isTurn || (requiresTarget && selectedTarget === null) || move.isPending} onClick={() => submitProject(true)} className="rounded bg-[#39bfe8] px-3 py-2 text-xs font-bold text-[#10262d] disabled:opacity-40 transition hover:brightness-110 active:scale-95 balku-hover-lift">公開で施工</button>
+                <button type="button" disabled={!isTurn || (requiresTarget && selectedTarget === null) || move.isPending} onClick={() => submitProject(false)} className="hazard-button rounded px-3 py-2 text-xs font-bold text-[#182a2e] disabled:opacity-40 transition active:scale-95 balku-hover-lift">伏せて施工</button>
+              </div>
+            </section>
+          )}
+
+          <div className="mt-3 grid gap-3 xl:grid-cols-2">
+            <div className="min-w-0" aria-label="企画カードのソート済み一覧">
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {sortedHand.projects.map((card) => (
+                  <CardFace key={card.id} card={card} selected={card.id === selectedPlan} draggable={isTurn && !me?.actionUsed && !isFinished} onPreview={() => setPreviewCard(card)} onDragStart={startCardDrag(card)} onDragEnd={() => setDraggingCard(null)} onClick={() => toggleCard(card)} />
+                ))}
+              </div>
+            </div>
+            <div className="min-w-0" aria-label="素材カード一覧">
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {sortedHand.materials.map((card) => (
+                  <CardFace key={card.id} card={card} selected={selectedMaterials.includes(card.id)} draggable={isTurn && !me?.actionUsed && !isFinished} onPreview={() => setPreviewCard(card)} onDragStart={startCardDrag(card)} onDragEnd={() => setDraggingCard(null)} onClick={() => { if (selectedProject) addBuildMaterial(card.id); else toggleCard(card); }} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section className="mt-3 flex flex-wrap items-center justify-end gap-3 rounded-lg border border-[#67cde0]/35 bg-[#10262d]/95 p-3 shadow-[0_12px_30px_rgba(0,0,0,0.45)] backdrop-blur">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" disabled={!isTurn || Boolean(me?.actionUsed) || move.isPending || isFinished} onClick={() => { Sound.play("error"); apply({ type: "endTurn" }); }} className="rounded border border-[#65c6de]/50 px-3 py-2 text-xs font-bold text-[#9fe4f4] disabled:opacity-40 transition hover:bg-[#39bfe8]/10 active:scale-95">
+            パス <ArrowRight className="ml-1 inline h-3.5 w-3.5" />
+          </button>
+        </div>
+      </section>
+
+      <Sheet open={shopOpen} onOpenChange={setShopOpen}>
+        <SheetContent side="right" className="border-[#f2c94c]/45 bg-[#10262d] text-[#edf0e4] sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle className="font-display text-3xl text-[#f4ead1]">ショップ</SheetTitle>
+            <SheetDescription className="text-[#a9c3c7]">自身のターンの時にコインを消費して素材を購入できます。</SheetDescription>
+          </SheetHeader>
+          <div className="px-4">
+            <p className="rounded bg-[#f2c94c]/10 px-3 py-2 text-xs font-bold text-[#f5db80]">所持 {me?.coins ?? 0} coins</p>
+            <div className="mt-4 grid gap-2">
+              {MARKET.map(({ material, price }) => (
+                <button key={material} type="button" disabled={!isTurn || Boolean(me?.actionUsed) || (me?.coins ?? 0) < price || move.isPending || isFinished} onClick={() => { Sound.play("shop"); apply({ type: "buyMaterial", material }); setShopOpen(false); }} className={`flex items-center justify-between rounded border px-4 py-3 text-left transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-35 ${MATERIAL_STYLE[material]}`}>
+                  <span className="font-bold">{material}{material === "超伝導体" && <span className="ml-1 text-[9px]">RARE</span>}</span>
+                  <span className="text-xs opacity-75">{price} coins</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <CardPreview card={previewCard} open={Boolean(previewCard)} onOpenChange={(open) => { if (!open) setPreviewCard(null); }} onSell={isTurn && !me?.actionUsed && !isFinished ? (card) => { sellCards([card.id]); setPreviewCard(null); } : undefined} />
+
+      {isFinished && (
+        <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-[#061217]/80 p-5 backdrop-blur-sm">
+          <section className="balku-result-panel my-8 w-full max-w-lg rounded-xl border border-[#39bfe8]/70 bg-[#102d35] p-7 text-center shadow-2xl">
+            <Check className={`mx-auto h-12 w-12 ${ownWins ? "text-[#68e0a7]" : "text-[#f2c94c]"}`} />
+            <p className="mt-4 text-xs font-bold tracking-[0.16em] text-[#39bfe8]">DECK EXHAUSTED / FINAL SETTLEMENT</p>
+            <h2 className="mt-3 font-display text-5xl font-bold text-[#f4ead1]">{sharedWin && ownWins ? "共同勝利" : ownWins ? "勝利" : "対戦終了"}</h2>
+            <p className="mt-3 text-sm leading-6 text-[#b5c7c9]">山札が尽き、提出企画とバフの合計ポイントを精算しました。</p>
+            <div className="mt-6 space-y-2 text-left">
+              {finalScores.map((score, index) => (
+                <div key={score.seat} className={`balku-result-row flex items-center justify-between rounded border px-4 py-3 ${winningSeats.includes(score.seat) ? "border-[#f2c94c]/70 bg-[#f2c94c]/10" : "border-white/10 bg-black/10"}`} style={{ animationDelay: `${index * 90}ms` }}>
+                  <div>
+                    <p className="text-sm font-bold">{index + 1}. {score.name}</p>
+                    <p className="mt-0.5 text-[10px] text-[#9bbabd]">企画 {score.submittedPoints} PT + バフ {score.bonusPoints} PT</p>
+                  </div>
+                  <strong className="font-display text-2xl text-[#f4d873]">{score.points} PT</strong>
+                </div>
+              ))}
+            </div>
+            {data.player.isHost ? (
+              <button type="button" disabled={restart.isPending} onClick={() => restart.mutate({ code: session.code, playerToken: session.playerToken, expectedRevision: data.revision })} className="mt-7 rounded bg-[#39bfe8] px-5 py-3 text-sm font-bold text-[#10272d] disabled:opacity-50 transition hover:brightness-110 active:scale-95">
+                同じ現場で再戦する
+              </button>
+            ) : (
+              <p className="mt-7 rounded border border-[#39bfe8]/30 bg-[#39bfe8]/10 px-4 py-3 text-sm text-[#9fe0ef]">作成者が再戦を準備するのを待っています。</p>
+            )}
+            <button type="button" onClick={handleLeave} className="mt-3 rounded border border-white/20 px-5 py-3 text-sm font-bold text-[#d9e4e3] transition hover:bg-white/5 active:scale-95">新しい現場へ</button>
+          </section>
+        </div>
+      )}
+
+      {tutorial && <Tutorial onClose={closeTutorial} />}
+    </main>
+  );
+}
+
+export default function Home() {
+  const [session, setSession] = useState<Session | null>(readSession);
+  const utils = trpc.useUtils();
+
+  useEffect(() => {
+    if (session) window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  }, [session]);
+
+  const enter = (next: Session) => {
+    window.history.replaceState({}, "", `/?room=${next.code}`);
+    setSession(next);
+  };
+
+  const leave = () => {
+    setSession(null);
+    window.sessionStorage.removeItem(SESSION_KEY);
+    window.history.replaceState({}, "", "/");
+  };
+
+  return session ? <OnlineRoom session={session} leave={leave} /> : <Lobby onSession={enter} />;
+}
