@@ -274,7 +274,7 @@ canvas { display: block; }
 }
 
 @keyframes balku-eliminate-fade {
-  0% { opacity: 1; transform: scale(1) filter: grayscale(0); }
+  0% { opacity: 1; transform: scale(1); filter: grayscale(0); }
   40% { opacity: 0.6; transform: scale(0.98) filter: grayscale(0.5); }
   100% { opacity: 0.35; transform: scale(0.95) filter: grayscale(1); }
 }
