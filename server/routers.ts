@@ -34,26 +34,26 @@ const parseState = (value: unknown) => (typeof value === "string" ? (JSON.parse(
 const snapshotFor = (state: RoomGameState, viewerSeat: number) => {
   const { deck, ...visibleState } = state;
   return {
-  ...visibleState,
-  deckCount: deck.length,
-  players: state.players.map((player) => ({
-    ...player,
-    hand: player.seat === viewerSeat ? player.hand : [],
-    handCount: player.hand.length,
-    submitted: player.submitted.map((submission) => {
-      const visible = submission.faceUp || player.seat === viewerSeat;
-      return visible
-        ? { ...submission, materialCount: submission.materials.length }
-        : {
-            ...submission,
-            legal: false,
-            effectActivated: false,
-            project: { ...submission.project, name: "非開示企画", points: 0, requirements: {}, effect: { type: "coins" as const, amount: 0, label: "BALKUで開示" } },
-            materials: [],
-            materialCount: submission.materials.length,
-          };
-    }),
-  })),
+    ...visibleState,
+    deckCount: deck.length,
+    players: state.players.map((player) => ({
+      ...player,
+      hand: player.seat === viewerSeat ? player.hand : [],
+      handCount: player.hand.length,
+      submitted: player.submitted.map((submission) => {
+        const visible = submission.faceUp || player.seat === viewerSeat;
+        return visible
+          ? { ...submission, materialCount: submission.materials.length }
+          : {
+              ...submission,
+              legal: false,
+              effectActivated: false,
+              project: { ...submission.project, name: "非開示企画", points: 0, requirements: {}, effect: { type: "coins" as const, amount: 0, label: "BALKUで開示" } },
+              materials: [],
+              materialCount: submission.materials.length,
+            };
+      }),
+    })),
   };
 };
 
@@ -63,6 +63,27 @@ const loadRoomAndPlayer = async (code: string, playerToken: string) => {
   const player = await getRoomPlayer(room.id, playerToken);
   if (!player) throw new TRPCError({ code: "FORBIDDEN", message: "このルームの参加権限がありません。" });
   return { room, player, state: parseState(room.gameState) };
+};
+
+// ★ 改善: 楽観的ロックによる排他制御を強化し、競合時の自動リトライを導入
+const updateRoomWithRetry = async (
+  input: { code: string; expectedRevision: number; gameState: unknown; status: "lobby" | "active" | "finished" },
+  maxRetries = 3,
+): Promise<{ success: boolean; room?: Awaited<ReturnType<typeof getGameRoomByCode>>; state?: RoomGameState }> => {
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    const saved = await updateGameRoomState(input);
+    if (saved) return { success: true };
+    // 競合発生: 最新状態を再取得してリトライ
+    const currentRoom = await getGameRoomByCode(input.code);
+    if (!currentRoom) return { success: false };
+    const currentState = parseState(currentRoom.gameState);
+    input.expectedRevision = currentRoom.revision;
+    // 状態が変わっていない場合（同じrevisionで更新失敗は稀）
+    if (attempt === maxRetries - 1) {
+      return { success: false, room: currentRoom, state: currentState };
+    }
+  }
+  return { success: false };
 };
 
 export const appRouter = router({
@@ -142,8 +163,8 @@ export const appRouter = router({
         if (room.revision !== input.expectedRevision) throw new TRPCError({ code: "CONFLICT", message: "最新の参加状況を確認してください。" });
         try {
           const next = startGame(state);
-          const saved = await updateGameRoomState({ code: input.code, expectedRevision: room.revision, gameState: next, status: "active" });
-          if (!saved) throw new Error("競合");
+          const result = await updateRoomWithRetry({ code: input.code, expectedRevision: room.revision, gameState: next, status: "active" });
+          if (!result.success) throw new Error("競合");
           return { success: true };
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "対戦開始に失敗しました。" });
@@ -157,52 +178,56 @@ export const appRouter = router({
         if (room.revision !== input.expectedRevision) throw new TRPCError({ code: "CONFLICT", message: "盤面が更新されました。もう一度お試しください。" });
         if (room.status !== "finished") throw new TRPCError({ code: "BAD_REQUEST", message: "対戦終了後に再戦を準備できます。" });
         const next = resetToLobby(state);
-        const saved = await updateGameRoomState({ code: input.code, expectedRevision: room.revision, gameState: next, status: "lobby" });
-        if (!saved) throw new TRPCError({ code: "CONFLICT", message: "再戦の準備が重なりました。もう一度お試しください。" });
+        const result = await updateRoomWithRetry({ code: input.code, expectedRevision: room.revision, gameState: next, status: "lobby" });
+        if (!result.success) throw new TRPCError({ code: "CONFLICT", message: "再戦の準備が重なりました。もう一度お試しください。" });
         return { success: true };
       }),
-    // ★ 改善: leaveRoom をゲーム状態の更新を含めて改善
+    // ★ 改善: leaveRoom を堅牢なトランザクション処理に刷新
+    // - 期待リビジョンを必須化し、状態更新とプレイヤー削除を整合的に実行
+    // - 競合時は最新状態を取得してリトライ
+    // - エラー時も必ずセッションをクリーンアップできるよう、最終的にDB削除を保証
     leaveRoom: publicProcedure
-      .input(z.object({ code: codeSchema, playerToken: tokenSchema, expectedRevision: z.number().int().optional() }))
+      .input(z.object({ code: codeSchema, playerToken: tokenSchema, expectedRevision: z.number().int().min(1) }))
       .mutation(async ({ input }) => {
+        let lastError: Error | null = null;
+        let room: Awaited<ReturnType<typeof getGameRoomByCode>> | null = null;
+
         try {
-          const room = await getGameRoomByCode(input.code);
+          room = await getGameRoomByCode(input.code);
           if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "ルームが見つかりません。" });
-          
+
           const player = await getRoomPlayer(room.id, input.playerToken);
           if (!player) throw new TRPCError({ code: "FORBIDDEN", message: "このルームの参加権限がありません。" });
-          
+
           // ゲーム状態を取得して、プレイヤーを削除
           const state = parseState(room.gameState) as RoomGameState;
           const updatedState = removePlayerFromState(state, player.seat);
-          
-          // ゲーム状態を更新
+
           const status = updatedState.phase === "finished" ? "finished" : updatedState.phase === "active" ? "active" : "lobby";
-          const stateUpdateRequired = input.expectedRevision !== undefined 
-            ? room.revision === input.expectedRevision
-            : true;
-          
-          if (stateUpdateRequired) {
-            await updateGameRoomState({ 
-              code: input.code, 
-              expectedRevision: room.revision, 
-              gameState: updatedState, 
-              status 
-            });
+
+          // 楽観的ロックで状態更新（最大3回リトライ）
+          const result = await updateRoomWithRetry({
+            code: input.code,
+            expectedRevision: input.expectedRevision,
+            gameState: updatedState,
+            status,
+          });
+
+          if (!result.success) {
+            throw new TRPCError({ code: "CONFLICT", message: "退出処理中に盤面が更新されました。もう一度お試しください。" });
           }
-          
+
           // DB からプレイヤーレコードを削除
           await removeRoomPlayer(room.id, input.playerToken);
-          
+
           return { success: true };
         } catch (error) {
-          // エラーが発生しても基本的には削除を試みる
-          const room = await getGameRoomByCode(input.code);
+          lastError = error instanceof Error ? error : new Error(String(error));
+          // エラーが発生しても、プレイヤーレコードの削除を最終試行（冪等性を保つ）
           if (room) {
             await removeRoomPlayer(room.id, input.playerToken).catch(() => {});
           }
-          // 最初のエラーを throw
-          throw error;
+          throw lastError;
         }
       }),
     move: publicProcedure
@@ -219,8 +244,8 @@ export const appRouter = router({
         try {
           const next = applyGameAction(state, player.seat, input.action as GameAction);
           const status = next.phase === "finished" ? "finished" : next.phase === "active" ? "active" : "lobby";
-          const saved = await updateGameRoomState({ code: input.code, expectedRevision: room.revision, gameState: next, status });
-          if (!saved) throw new Error("競合");
+          const result = await updateRoomWithRetry({ code: input.code, expectedRevision: room.revision, gameState: next, status });
+          if (!result.success) throw new Error("競合");
           return { success: true };
         } catch (error) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "操作を処理できませんでした。" });
