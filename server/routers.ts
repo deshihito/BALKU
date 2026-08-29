@@ -11,7 +11,7 @@ import {
   getPublicRooms,
   removeRoomPlayer,
 } from "./db";
-import { addLobbyPlayer, applyGameAction, createLobbyState, expireTimedOutTurn, resetToLobby, type GameAction, type RoomGameState, startGame } from "./balkuGame";
+import { addLobbyPlayer, applyGameAction, createLobbyState, expireTimedOutTurn, resetToLobby, removePlayerFromState, type GameAction, type RoomGameState, startGame } from "./balkuGame";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 
@@ -66,7 +66,6 @@ const loadRoomAndPlayer = async (code: string, playerToken: string) => {
 };
 
 export const appRouter = router({
-    // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   balku: router({
     createRoom: publicProcedure
@@ -162,13 +161,49 @@ export const appRouter = router({
         if (!saved) throw new TRPCError({ code: "CONFLICT", message: "再戦の準備が重なりました。もう一度お試しください。" });
         return { success: true };
       }),
+    // ★ 改善: leaveRoom をゲーム状態の更新を含めて改善
     leaveRoom: publicProcedure
-      .input(z.object({ code: codeSchema, playerToken: tokenSchema }))
+      .input(z.object({ code: codeSchema, playerToken: tokenSchema, expectedRevision: z.number().int().optional() }))
       .mutation(async ({ input }) => {
-        const room = await getGameRoomByCode(input.code);
-        if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "ルームが見つかりません。" });
-        await removeRoomPlayer(room.id, input.playerToken);
-        return { success: true };
+        try {
+          const room = await getGameRoomByCode(input.code);
+          if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "ルームが見つかりません。" });
+          
+          const player = await getRoomPlayer(room.id, input.playerToken);
+          if (!player) throw new TRPCError({ code: "FORBIDDEN", message: "このルームの参加権限がありません。" });
+          
+          // ゲーム状態を取得して、プレイヤーを削除
+          const state = parseState(room.gameState) as RoomGameState;
+          const updatedState = removePlayerFromState(state, player.seat);
+          
+          // ゲーム状態を更新
+          const status = updatedState.phase === "finished" ? "finished" : updatedState.phase === "active" ? "active" : "lobby";
+          const stateUpdateRequired = input.expectedRevision !== undefined 
+            ? room.revision === input.expectedRevision
+            : true;
+          
+          if (stateUpdateRequired) {
+            await updateGameRoomState({ 
+              code: input.code, 
+              expectedRevision: room.revision, 
+              gameState: updatedState, 
+              status 
+            });
+          }
+          
+          // DB からプレイヤーレコードを削除
+          await removeRoomPlayer(room.id, input.playerToken);
+          
+          return { success: true };
+        } catch (error) {
+          // エラーが発生しても基本的には削除を試みる
+          const room = await getGameRoomByCode(input.code);
+          if (room) {
+            await removeRoomPlayer(room.id, input.playerToken).catch(() => {});
+          }
+          // 最初のエラーを throw
+          throw error;
+        }
       }),
     move: publicProcedure
       .input(z.object({ code: codeSchema, playerToken: tokenSchema, expectedRevision: z.number().int().min(1), action: actionSchema }))
