@@ -275,8 +275,8 @@ canvas { display: block; }
 
 @keyframes balku-eliminate-fade {
   0% { opacity: 1; transform: scale(1); filter: grayscale(0); }
-  40% { opacity: 0.6; transform: scale(0.98) filter: grayscale(0.5); }
-  100% { opacity: 0.35; transform: scale(0.95) filter: grayscale(1); }
+  40% { opacity: 0.6; transform: scale(0.98); filter: grayscale(0.5); }
+  100% { opacity: 0.35; transform: scale(0.95); filter: grayscale(1); }
 }
 
 @keyframes balku-shockwave {
@@ -476,4 +476,327 @@ canvas { display: block; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
+/* ── 新規アニメーション群 ── */
+
+.balku-card-flip {
+  animation: balku-card-flip 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-card-shake {
+  animation: balku-card-shake 520ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.balku-coin-pop {
+  animation: balku-coin-pop 600ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-draw-slide {
+  animation: balku-draw-slide 380ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-eliminate-fade {
+  animation: balku-eliminate-fade 800ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-shockwave {
+  animation: balku-shockwave 700ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-pulse-glow {
+  animation: balku-pulse-glow 1.6s ease-in-out infinite;
+}
+
+.balku-timer-urgent {
+  animation: balku-timer-urgent 1s ease-in-out infinite;
+}
+
+.balku-log-pop {
+  animation: balku-log-pop 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-button-press {
+  animation: balku-button-press 120ms ease-out both;
+}
+
+.balku-float {
+  animation: balku-float 3s ease-in-out infinite;
+}
+
+.balku-slide-in-left {
+  animation: balku-slide-in-left 400ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-slide-in-right {
+  animation: balku-slide-in-right 400ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-scale-bounce {
+  animation: balku-scale-bounce 500ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-rotate-in {
+  animation: balku-rotate-in 500ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-flash {
+  animation: balku-flash 300ms ease-out both;
+}
+
+.balku-vibrate {
+  animation: balku-vibrate 0.3s linear both;
+}
+
+.balku-ripple {
+  position: relative;
+  overflow: hidden;
+}
+.balku-ripple::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(57, 191, 232, 0.35) 0%, transparent 70%);
+  opacity: 0;
+  transform: scale(0);
+  animation: balku-ripple-effect 600ms ease-out both;
+  pointer-events: none;
+}
+
+.balku-glow-ping {
+  animation: balku-glow-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.balku-stamp {
+  animation: balku-stamp 280ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.balku-turn-badge {
+  animation: balku-turn-badge 2s ease-in-out infinite;
+}
+
+.balku-danger-pulse {
+  animation: balku-danger-pulse 1.2s ease-in-out infinite;
+}
+
+.balku-hover-lift {
+  transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms ease;
+}
+.balku-hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+/* ★ 新規 @keyframes */
+
+@keyframes balku-card-flip {
+  0% { opacity: 0; transform: perspective(600px) rotateY(-90deg) scale(0.9); }
+  60% { opacity: 1; transform: perspective(600px) rotateY(10deg) scale(1.02); }
+  100% { opacity: 1; transform: perspective(600px) rotateY(0deg) scale(1); }
+}
+
+@keyframes balku-card-shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) rotate(-1deg); }
+  20%, 40%, 60%, 80% { transform: translateX(5px) rotate(1deg); }
+}
+
+@keyframes balku-coin-pop {
+  0% { opacity: 0; transform: translateY(20px) scale(0.5); }
+  50% { opacity: 1; transform: translateY(-6px) scale(1.15); }
+  70% { transform: translateY(2px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes balku-draw-slide {
+  0% { opacity: 0; transform: translateX(-40px) rotate(-5deg); }
+  70% { opacity: 1; transform: translateX(4px) rotate(1deg); }
+  100% { opacity: 1; transform: translateX(0) rotate(0); }
+}
+
+@keyframes balku-eliminate-fade {
+  0% { opacity: 1; transform: scale(1); filter: grayscale(0); }
+  40% { opacity: 0.6; transform: scale(0.98); filter: grayscale(0.5); }
+  100% { opacity: 0.35; transform: scale(0.95); filter: grayscale(1); }
+}
+
+@keyframes balku-shockwave {
+  0% { opacity: 1; transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 117, 108, 0.6); }
+  70% { opacity: 0.8; transform: scale(1.05); box-shadow: 0 0 0 20px rgba(239, 117, 108, 0); }
+  100% { opacity: 0; transform: scale(1.1); box-shadow: 0 0 0 0 rgba(239, 117, 108, 0); }
+}
+
+@keyframes balku-pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(57, 191, 232, 0.25); }
+  50% { box-shadow: 0 0 24px rgba(57, 191, 232, 0.55), 0 0 48px rgba(57, 191, 232, 0.2); }
+}
+
+@keyframes balku-timer-urgent {
+  0%, 100% { background-color: rgba(58, 29, 32, 1); border-color: rgba(239, 117, 108, 0.65); }
+  50% { background-color: rgba(80, 25, 28, 1); border-color: rgba(239, 117, 108, 1); }
+}
+
+@keyframes balku-log-pop {
+  0% { opacity: 0; transform: translateX(-8px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes balku-button-press {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+
+@keyframes balku-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes balku-slide-in-left {
+  0% { opacity: 0; transform: translateX(-30px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes balku-slide-in-right {
+  0% { opacity: 0; transform: translateX(30px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes balku-scale-bounce {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  80% { transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes balku-rotate-in {
+  0% { opacity: 0; transform: rotate(-8deg) scale(0.92); }
+  100% { opacity: 1; transform: rotate(0deg) scale(1); }
+}
+
+@keyframes balku-flash {
+  0% { background-color: rgba(242, 201, 76, 0.4); }
+  100% { background-color: transparent; }
+}
+
+@keyframes balku-vibrate {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(-2px, -2px); }
+  60% { transform: translate(2px, 2px); }
+  80% { transform: translate(2px, -2px); }
+  100% { transform: translate(0); }
+}
+
+@keyframes balku-ripple-effect {
+  0% { opacity: 0.6; transform: scale(0); }
+  100% { opacity: 0; transform: scale(2.5); }
+}
+
+@keyframes balku-glow-ping {
+  0% { box-shadow: 0 0 0 0 rgba(57, 191, 232, 0.5); }
+  70% { box-shadow: 0 0 0 12px rgba(57, 191, 232, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(57, 191, 232, 0); }
+}
+
+@keyframes balku-stamp {
+  0% { opacity: 0; transform: scale(2) rotate(-10deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+@keyframes balku-turn-badge {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(57, 191, 232, 0.3); }
+  50% { transform: scale(1.03); box-shadow: 0 0 12px 4px rgba(57, 191, 232, 0.15); }
+}
+
+@keyframes balku-danger-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 117, 108, 0.35); }
+  50% { box-shadow: 0 0 16px 6px rgba(239, 117, 108, 0.15); }
+}
+
+/* 素材カードごとのホバーグロー */
+.material-glow-木材:hover { box-shadow: 0 0 16px rgba(251, 146, 60, 0.45); }
+.material-glow-鉄骨:hover { box-shadow: 0 0 16px rgba(148, 163, 184, 0.45); }
+.material-glow-コンクリート:hover { box-shadow: 0 0 16px rgba(168, 162, 158, 0.45); }
+.material-glow-ガラス:hover { box-shadow: 0 0 16px rgba(34, 211, 238, 0.45); }
+.material-glow-銅線:hover { box-shadow: 0 0 16px rgba(251, 191, 36, 0.45); }
+.material-glow-合金:hover { box-shadow: 0 0 16px rgba(167, 139, 250, 0.45); }
+.material-glow-超伝導体:hover { box-shadow: 0 0 20px rgba(232, 121, 249, 0.55); }
+.material-glow-ゴミ:hover { box-shadow: 0 0 16px rgba(156, 163, 175, 0.35); }
+
+/* ドラッグ中のカードスタイル */
+.dragging-card {
+  opacity: 0.85;
+  transform: scale(1.08) rotate(3deg);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  cursor: grabbing;
+}
+
+/* ドロップゾーンのアクティブ状態 */
+.drop-zone-active {
+  border-style: dashed;
+  border-width: 2px;
+  background-color: rgba(57, 191, 232, 0.08);
+}
+
+/* ターンインジケーターの発光リング */
+.turn-indicator-ring {
+  position: relative;
+}
+.turn-indicator-ring::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgba(57, 191, 232, 0.4);
+  animation: balku-glow-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+/* 点数変動ポップアップ */
+.score-pop {
+  position: absolute;
+  pointer-events: none;
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 800;
+  font-size: 1.5rem;
+  animation: balku-coin-pop 800ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+.score-pop-up { color: #68e0a7; }
+.score-pop-down { color: #ef756c; }
+
+/* カード選択時のリングアニメーション */
+.card-select-ring {
+  animation: balku-pulse-glow 1.2s ease-in-out infinite;
+}
+
+/* 被弾時の画面エフェクト */
+.screen-shake {
+  animation: balku-card-shake 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* オークション入札時のハイライト */
+.bid-highlight {
+  animation: balku-flash 400ms ease-out both;
+}
+
+/* チュートリアルステップ遷移 */
+.tutorial-step-enter {
+  animation: balku-slide-in-left 350ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* ロビー参加者追加 */
+.lobby-player-enter {
+  animation: balku-scale-bounce 350ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* 建設完了スタンプ */
+.build-stamp {
+  animation: balku-stamp 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* 接続状態インジケータ */
+.connection-pulse {
+  animation: balku-pulse-glow 2s ease-in-out infinite;
 }
