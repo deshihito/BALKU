@@ -493,6 +493,35 @@ export function applyGameAction(state: RoomGameState, seat: number, action: Game
   }
   return next;
 }
-
+export function removePlayerFromState(state: RoomGameState, playerSeat: number): RoomGameState {
+  const next = structuredClone(state);
+  const player = next.players[playerSeat];
+  
+  if (!player) {
+    throw new Error("プレイヤーが見つかりません。");
+  }
+  
+  // ロビーフェーズの場合は配列から完全に削除
+  if (next.phase === "lobby") {
+    next.players = next.players.filter((p) => p.seat !== playerSeat);
+    log(next, `${player.name}が退出しました。`, "warning");
+    return next;
+  }
+  
+  // ゲーム中の場合は eliminated = true に設定（状態の整合性を保つ）
+  player.eliminated = true;
+  player.hand = [];
+  player.submitted = [];
+  
+  log(next, `${player.name}が退出し、脱落しました。`, "danger");
+  
+  // 全員が脱落した場合は終了判定
+  const activePlayers = next.players.filter((p) => !p.eliminated);
+  if (activePlayers.length <= 1 && next.phase === "active") {
+    finishByScore(next);
+  }
+  
+  return next;
+}
 export const getTotalPoints = totalPoints;
 export const getMarketPrice = (kind: MaterialKind) => marketPrices[kind];
