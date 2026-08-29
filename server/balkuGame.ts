@@ -1,4 +1,3 @@
-
 export type MaterialKind = "木材" | "鉄骨" | "コンクリート" | "ガラス" | "銅線" | "合金" | "超伝導体" | "ゴミ";
 export type EffectType = "coins" | "draw" | "gainMaterial" | "randomMaterial" | "randomProject" | "pointBoost" | "income" | "randomMaterialIncome" | "mysteryHouse" | "stealCoins" | "stealCard" | "discard" | "forceBulk";
 
@@ -82,18 +81,33 @@ const project = (
 ): ProjectCard => ({ id, kind: "project", name, points, requirements, effect: { type, amount, label, material: gainedMaterial }, immediate });
 
 const material = (id: string, kind: MaterialKind): MaterialCard => ({ id, kind: "material", material: kind, name: kind, value: 0, ...(kind === "超伝導体" ? { rarity: "premium" as const } : {}) });
+
 export const NEW_PROJECT_DEFINITIONS = [
   { card: project("", "ミステリーハウス", 5, { 超伝導体: 2, 銅線: 3, コンクリート: 2, 鉄骨: 2 }, "mysteryHouse", 1, "+3コイン / 毎ターン ランダム素材 +1"), copies: 1 },
   { card: project("", "小屋", 6, { 木材: 3 }, "coins", 1, "コイン +1"), copies: 3 },
   { card: project("", "光ファイバー", 1, { 銅線: 3 }, "gainMaterial", 1, "超伝導体を1枚獲得", false, "超伝導体"), copies: 2 },
   { card: project("", "ミュージアム", 2, { コンクリート: 1, 鉄骨: 1, ガラス: 1 }, "randomProject", 1, "ランダムな企画カードを1枚獲得"), copies: 2 },
   { card: project("", "ゴミ山", 1, { ゴミ: 3 }, "coins", 1, "コイン +1"), copies: 3 },
+  // ★ 新規企画カード群
+  { card: project("", "解体工事", 3, { 木材: 1, 鉄骨: 1 }, "discard", 1, "指定会社の手札を1枚破棄", true), copies: 2 },
+  { card: project("", "環境アセス", 4, { ガラス: 2, 銅線: 1 }, "draw", 2, "カードを2枚引く", true), copies: 2 },
+  { card: project("", "地下シェルター", 9, { コンクリート: 3, 鉄骨: 2 }, "pointBoost", 3, "最終ポイント +3"), copies: 2 },
+  { card: project("", "スマート農場", 5, { 合金: 1, ガラス: 2 }, "income", 1, "毎ターン開始時 コイン +1"), copies: 2 },
+  { card: project("", "風力発電所", 7, { 鉄骨: 2, 合金: 2, 銅線: 1 }, "coins", 3, "コイン +3"), copies: 2 },
+  { card: project("", "水族館", 6, { ガラス: 3, コンクリート: 1 }, "randomMaterial", 2, "ランダム素材を2枚獲得"), copies: 2 },
+  { card: project("", "宇宙港", 14, { 超伝導体: 2, 合金: 2, 鉄骨: 2, コンクリート: 1 }, "pointBoost", 5, "最終ポイント +5"), copies: 1 },
+  { card: project("", "緊急補修", 2, {}, "randomMaterial", 2, "ランダム素材を2枚獲得", true), copies: 2 },
+  { card: project("", "独占契約", 5, { 銅線: 2, 合金: 1 }, "stealCard", 1, "ランダムに手札1枚を奪う"), copies: 2 },
+  { card: project("", "高層ビル", 10, { コンクリート: 3, 鉄骨: 3, ガラス: 2 }, "draw", 4, "カードを4枚引く"), copies: 1 },
+  { card: project("", "原子力施設", 13, { 超伝導体: 1, 合金: 3, コンクリート: 2 }, "coins", 8, "コイン +8"), copies: 1 },
+  { card: project("", "遊園地", 8, { 木材: 2, 鉄骨: 1, ガラス: 2, 銅線: 1 }, "pointBoost", 2, "最終ポイント +2"), copies: 1 },
 ] as const;
+
 const nextId = (state: RoomGameState, prefix: string) => `${prefix}-${++state.serial}`;
 
 const log = (state: RoomGameState, text: string, tone: LogTone = "neutral") => {
   state.logs.unshift({ id: nextId(state, "log"), text, tone, createdAt: Date.now() });
-  state.logs = state.logs.slice(0, 16);
+  state.logs = state.logs.slice(0, 24);
 };
 
 const scoreBreakdown = (player: GamePlayer) => {
@@ -494,35 +508,50 @@ export function applyGameAction(state: RoomGameState, seat: number, action: Game
   }
   return next;
 }
+
+// ★ 改善: 退出処理の根本的な修正
+// - ロビー時: seatを振り直して整合性を保つ
+// - ゲーム中: activeSeatが退出者だった場合、次のターンへ自動進行
+// - 全員脱落時: 即座に終了判定
 export function removePlayerFromState(state: RoomGameState, playerSeat: number): RoomGameState {
   const next = structuredClone(state);
-  const player = next.players[playerSeat];
-  
-  if (!player) {
-    throw new Error("プレイヤーが見つかりません。");
-  }
-  
-  // ロビーフェーズの場合は配列から完全に削除
+  const playerIndex = next.players.findIndex((p) => p.seat === playerSeat);
+  if (playerIndex === -1) throw new Error("プレイヤーが見つかりません。");
+  const player = next.players[playerIndex];
+
+  // ロビーフェーズ: 配列から完全に削除し、seatを振り直す
   if (next.phase === "lobby") {
-    next.players = next.players.filter((p) => p.seat !== playerSeat);
+    next.players.splice(playerIndex, 1);
+    next.players.forEach((p, i) => { p.seat = i; });
     log(next, `${player.name}が退出しました。`, "warning");
     return next;
   }
-  
-  // ゲーム中の場合は eliminated = true に設定（状態の整合性を保つ）
+
+  // ゲーム中: eliminated = true に設定（状態の整合性を保つ）
   player.eliminated = true;
   player.hand = [];
   player.submitted = [];
-  
-  log(next, `${player.name}が退出し、脱落しました。`, "danger");
-  
-  // 全員が脱落した場合は終了判定
+
+  const wasActive = next.activeSeat === playerSeat;
   const activePlayers = next.players.filter((p) => !p.eliminated);
+
+  // 全員脱落 or 1社のみ残った場合は即座に終了
   if (activePlayers.length <= 1 && next.phase === "active") {
     finishByScore(next);
+    log(next, `${player.name}が退出。${activePlayers.length === 1 ? `残り1社で${activePlayers[0]?.name}の勝利。` : "全社脱落で対戦終了。"}`, "danger");
+    return next;
   }
-  
+
+  // 現在のターンが退出者だった場合、次の有効プレイヤーへスキップ
+  if (wasActive && next.phase === "active") {
+    log(next, `${player.name}が退出し、ターンをスキップ。`, "danger");
+    advanceTurn(next);
+  } else {
+    log(next, `${player.name}が退出し、脱落しました。`, "danger");
+  }
+
   return next;
 }
+
 export const getTotalPoints = totalPoints;
 export const getMarketPrice = (kind: MaterialKind) => marketPrices[kind];
